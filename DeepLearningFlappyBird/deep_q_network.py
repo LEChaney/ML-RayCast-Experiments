@@ -45,7 +45,7 @@ def max_pool_2x2(x):
 def using_TPU():
     if 'COLAB_TPU_ADDR' in os.environ:
         return True
-    else 
+    else:
         return False
 
 if using_TPU():
