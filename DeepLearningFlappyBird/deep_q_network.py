@@ -53,6 +53,7 @@ if using_TPU():
     resolver = tf.contrib.cluster_resolver.TPUClusterResolver(tpu=TPU_WORKER)
     tf.contrib.distribute.initialize_tpu_system(resolver)
     strategy = tf.contrib.distribute.TPUStrategy(resolver)
+    print('using TPU')
 
 with strategy.scope() if using_TPU() else dummy_context_mgr():
     def createNetwork():
