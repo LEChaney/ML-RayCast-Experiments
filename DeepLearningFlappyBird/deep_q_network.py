@@ -96,6 +96,7 @@ with strategy.scope() if using_TPU() else dummy_context_mgr():
 
         return s, readout, h_fc1
 
+with strategy.scope() if using_TPU() else dummy_context_mgr():
     def trainNetwork(s, readout, h_fc1, sess):
         # define the cost function
         a = tf.placeholder("float", [None, ACTIONS])
@@ -225,13 +226,15 @@ with strategy.scope() if using_TPU() else dummy_context_mgr():
                 a_file.write(",".join([str(x) for x in readout_t]) + '\n')
                 h_file.write(",".join([str(x) for x in h_fc1.eval(feed_dict={s:[s_t]})[0]]) + '\n')
                 cv2.imwrite("logs_tetris/frame" + str(t) + ".png", x_t1)
+        
             '''
-
+with strategy.scope() if using_TPU() else dummy_context_mgr():
     def playGame():
         sess = tf.InteractiveSession()
         s, readout, h_fc1 = createNetwork()
         trainNetwork(s, readout, h_fc1, sess)
 
+with strategy.scope() if using_TPU() else dummy_context_mgr():
     def main():
         playGame()
 
