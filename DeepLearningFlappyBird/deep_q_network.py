@@ -97,7 +97,7 @@ with strategy.scope() if using_TPU() else dummy_context_mgr():
         return s, readout, h_fc1
 
 with strategy.scope() if using_TPU() else dummy_context_mgr():
-    def trainNetwork(s, readout, h_fc1, sess):
+    def trainNetwork(s, readout, h_fc1, sess, strategy):
         # define the cost function
         a = tf.placeholder("float", [None, ACTIONS])
         y = tf.placeholder("float", [None])
@@ -232,7 +232,7 @@ with strategy.scope() if using_TPU() else dummy_context_mgr():
     def playGame():
         sess = tf.InteractiveSession()
         s, readout, h_fc1 = createNetwork()
-        trainNetwork(s, readout, h_fc1, sess)
+        trainNetwork(s, readout, h_fc1, sess, strategy)
 
 with strategy.scope() if using_TPU() else dummy_context_mgr():
     def main():
