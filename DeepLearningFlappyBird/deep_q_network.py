@@ -45,6 +45,8 @@ def max_pool_2x2(x):
 def using_TPU():
     if 'COLAB_TPU_ADDR' in os.environ:
         return True
+    else 
+        return False
 
 if using_TPU():
     TPU_WORKER = 'grpc://' + os.environ['COLAB_TPU_ADDR']
@@ -231,4 +233,5 @@ with strategy.scope() if using_TPU() else dummy_context_mgr():
         playGame()
 
 if __name__ == "__main__":
-    main()
+    with strategy.scope() if using_TPU() else dummy_context_mgr():
+        main()
