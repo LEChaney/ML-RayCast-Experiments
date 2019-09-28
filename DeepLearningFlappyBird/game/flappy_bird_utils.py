@@ -75,7 +75,7 @@ def load():
         getHitmask(IMAGES['player'][2]),
     )
 
-    return IMAGES, SOUNDS, HITMASKS
+    return IMAGES, HITMASKS
 
 def getHitmask(image):
     """returns a hitmask using an image's alpha."""
