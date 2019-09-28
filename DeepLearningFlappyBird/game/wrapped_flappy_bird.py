@@ -131,12 +131,16 @@ class GameState:
         for uPipe, lPipe in zip(self.upperPipes, self.lowerPipes):
             SCREEN.blit(IMAGES['pipe'][0], (uPipe['x'], uPipe['y']))
             SCREEN.blit(IMAGES['pipe'][1], (lPipe['x'], lPipe['y']))
+            # pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(uPipe['x'], uPipe['y'], 10, 10))
+            # pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(lPipe['x'], lPipe['y'], 10, 10))
 
         SCREEN.blit(IMAGES['base'], (self.basex, BASEY))
         # print score so player overlaps the score
         # showScore(self.score)
         SCREEN.blit(IMAGES['player'][self.playerIndex],
                     (self.playerx, self.playery))
+
+        # pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(self.playerx, self.playery, 10, 10))
 
         image_data = pygame.surfarray.array3d(pygame.display.get_surface())
         pygame.display.update()

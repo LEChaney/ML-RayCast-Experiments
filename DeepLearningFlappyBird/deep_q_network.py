@@ -9,6 +9,7 @@ import wrapped_flappy_bird as game
 import random
 import numpy as np
 from collections import deque
+from datetime import datetime
 
 GAME = 'bird' # the name of the game being played for log files
 ACTIONS = 2 # number of valid actions
@@ -92,6 +93,7 @@ def trainNetwork(s, readout, h_fc1, sess):
     # printing
     a_file = open("logs_" + GAME + "/readout.txt", 'w')
     h_file = open("logs_" + GAME + "/hidden.txt", 'w')
+    log_dir = "logs_" + GAME + "/"
 
     # get the first state by doing nothing and preprocess the image to 80x80x4
     do_nothing = np.zeros(ACTIONS)
@@ -104,16 +106,20 @@ def trainNetwork(s, readout, h_fc1, sess):
     # saving and loading networks
     saver = tf.train.Saver()
     sess.run(tf.initialize_all_variables())
-    checkpoint = tf.train.get_checkpoint_state("saved_networks")
+    # checkpoint = tf.train.get_checkpoint_state("saved_networks")
     # if checkpoint and checkpoint.model_checkpoint_path:
     #     saver.restore(sess, checkpoint.model_checkpoint_path)
     #     print("Successfully loaded:", checkpoint.model_checkpoint_path)
     # else:
     #     print("Could not find old network weights")
 
+    now = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    summary_writer = tf.summary.FileWriter(log_dir + now, sess.graph)
+
     # start training
     epsilon = INITIAL_EPSILON
     t = 0
+    max_score = 0
     while "flappy bird" != "angry bird":
         # choose an action epsilon greedily
         readout_t = readout.eval(feed_dict={s : [s_t]})[0]
@@ -191,6 +197,20 @@ def trainNetwork(s, readout, h_fc1, sess):
             state = "explore"
         else:
             state = "train"
+        
+        max_score = max(game_state.score, max_score)
+        score_summary = tf.Summary(value=[
+            tf.Summary.Value(tag="Max Score", simple_value=float(max_score))
+        ])
+        epsilon_summary = tf.Summary(value=[
+            tf.Summary.Value(tag="Epsilon", simple_value=float(epsilon))
+        ])
+        q_max_summary = tf.Summary(value=[
+            tf.Summary.Value(tag="Q_MAX", simple_value=float(np.max(readout_t)))
+        ])
+        summary_writer.add_summary(epsilon_summary, t)
+        summary_writer.add_summary(q_max_summary, t)
+        summary_writer.add_summary(score_summary, t)
 
         if t % 10000 == 0:
             print("TIMESTEP", t, "/ STATE", state, \
