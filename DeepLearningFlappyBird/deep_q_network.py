@@ -101,7 +101,9 @@ with strategy.scope() if using_TPU() else dummy_context_mgr():
         y = tf.placeholder("float", [None])
         readout_action = tf.reduce_sum(tf.multiply(readout, a), reduction_indices=1)
         cost = tf.reduce_mean(tf.square(y - readout_action))
-        train_step = tf.train.AdamOptimizer(1e-6).minimize(cost)
+        optimizer = tf.train.AdamOptimizer(1e-3)
+        grads_and_vars = optimizer.compute_gradients(cost)
+        train_step = optimizer._distributed_apply(grads_and_vars)
 
         # open up a game state to communicate with emulator
         game_state = game.GameState()
