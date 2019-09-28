@@ -9,7 +9,7 @@ import wrapped_flappy_bird as game
 import random
 import numpy as np
 from collections import deque
-
+import os
 import contextlib
 
 @contextlib.contextmanager
