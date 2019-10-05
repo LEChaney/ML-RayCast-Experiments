@@ -1,4 +1,7 @@
 # ignore all pyc files.
 *.pyc
 
-saved_networks/*
+*.bat
+logs_bird/*
+
+saved_networks*/*
