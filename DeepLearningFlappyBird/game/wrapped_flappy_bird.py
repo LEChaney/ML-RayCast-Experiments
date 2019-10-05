@@ -3,9 +3,12 @@ import sys
 import random
 import pygame
 import flappy_bird_utils
+from flappy_bird_utils import raycast_fan
 import pygame.surfarray as surfarray
 from pygame.locals import *
 from itertools import cycle
+
+import matplotlib.pyplot as plt
 
 FPS = 30
 SCREENWIDTH  = 288
@@ -140,9 +143,20 @@ class GameState:
         SCREEN.blit(IMAGES['player'][self.playerIndex],
                     (self.playerx, self.playery))
 
-        # pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(self.playerx, self.playery, 10, 10))
 
         image_data = pygame.surfarray.array3d(pygame.display.get_surface())
+
+        # pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(self.playerx + PLAYER_WIDTH // 2 - 5, self.playery + PLAYER_HEIGHT // 2 - 5, 10, 10))
+        
+        # print(image_data.shape)
+        # plt.imshow(image_data)
+        # plt.show()
+
+        hit_locations, distances = raycast_fan(image_data, (self.playerx + PLAYER_WIDTH // 2, self.playery + PLAYER_HEIGHT // 2))
+        for loc in hit_locations:
+            pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(loc[0] - 5, loc[1] - 5, 10, 10))
+        # print(distances)
+
         pygame.display.update()
         FPSCLOCK.tick()
         #print self.upperPipes[0]['y'] + PIPE_HEIGHT - int(BASEY * 0.2)
