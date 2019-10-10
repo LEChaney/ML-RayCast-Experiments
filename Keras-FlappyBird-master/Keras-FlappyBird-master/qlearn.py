@@ -97,6 +97,7 @@ def trainNetwork(model,args):
         epsilon = INITIAL_EPSILON
 
     t = 0
+    max_score = 0
     while (True):
         loss = 0
         Q_sa = 0
@@ -172,9 +173,11 @@ def trainNetwork(model,args):
         else:
             state = "train"
 
+        max_score = max(max_score, game_state.score)
+
         print("TIMESTEP", t, "/ STATE", state, \
             "/ EPSILON", epsilon, "/ ACTION", action_index, "/ REWARD", r_t, \
-            "/ Q_MAX " , np.max(Q_sa), "/ Loss ", loss)
+            "/ Q_MAX " , np.max(Q_sa), "/ Loss ", loss, "/ Score ", max_score)
 
     print("Episode finished!")
     print("************************")
