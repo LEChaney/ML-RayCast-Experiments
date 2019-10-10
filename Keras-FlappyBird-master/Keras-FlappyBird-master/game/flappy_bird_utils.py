@@ -147,13 +147,13 @@ def get_line(start, end):
         points.reverse()
     return np.array(points)
 
-def raycast_fan(img, start, direction=0, num_rays=15, fan_angle=math.pi):
+def raycast_fan(img, start, num_rays=15, fan_angle=math.pi, direction=0):
     '''
     # INPUT: img - the image to perform the raycasts on
     # INPUT: start - (x, y) tuple start location for raycasts
-    # INPUT: direction - the direction, in radians, the raycast fan will be oriented
     # INPUT: num_rays - the number of rays to fire
     # INPUT: fan_angle - the angle over which the rays are spread
+    # INPUT: direction - the direction, in radians, the raycast fan will be oriented
     #
     # OUTPUT: (hit_locations, distances)
     # OUTPUT: hit_locations - the hit locations of each ray (numpy arrays)
@@ -196,4 +196,4 @@ def raycast_fan(img, start, direction=0, num_rays=15, fan_angle=math.pi):
         hit_locations.append(out_hit)
         distances.append(np.linalg.norm(out_hit - start))
     
-    return hit_locations, distances
+    return np.array(hit_locations), np.array(distances)

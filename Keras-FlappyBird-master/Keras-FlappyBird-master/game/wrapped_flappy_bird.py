@@ -18,7 +18,7 @@ SCREEN = pygame.display.set_mode((SCREENWIDTH, SCREENHEIGHT))
 pygame.display.set_caption('Flappy Bird')
 
 IMAGES, SOUNDS, HITMASKS = flappy_bird_utils.load()
-PIPEGAPSIZE = 100 # gap between upper and lower part of pipe
+PIPEGAPSIZE = 150 # gap between upper and lower part of pipe
 BASEY = SCREENHEIGHT * 0.79
 
 PLAYER_WIDTH = IMAGES['player'][0].get_width()
@@ -147,9 +147,9 @@ class GameState:
         # plt.imshow(image_data)
         # plt.show()
 
-        hit_locations, distances = raycast_fan(image_data, (self.playerx + PLAYER_WIDTH // 2, self.playery + PLAYER_HEIGHT // 2))
-        for loc in hit_locations:
-            pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(loc[0] - 5, loc[1] - 5, 10, 10))
+        # hit_locations, distances = raycast_fan(image_data, (self.playerx + PLAYER_WIDTH // 2, self.playery + PLAYER_HEIGHT // 2))
+        # for loc in hit_locations:
+        #     pygame.display.get_surface().fill(Color(255, 255, 255), rect=Rect(loc[0] - 5, loc[1] - 5, 10, 10))
         # print(distances)
 
         pygame.display.update()
