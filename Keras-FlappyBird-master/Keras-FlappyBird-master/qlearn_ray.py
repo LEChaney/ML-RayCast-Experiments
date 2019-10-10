@@ -51,8 +51,8 @@ def buildmodel():
     # model.add(Convolution2D(64, 3, 3, subsample=(1, 1), border_mode='same'))
     # model.add(Activation('relu'))
     # model.add(Flatten())
-    model.add(Dense(2*NUM_RAYS))
-    model.add(Dense(2*NUM_RAYS))
+    model.add(Dense(128))
+    model.add(Dense(128))
     model.add(Activation('relu'))
     model.add(Dense(2))
    
