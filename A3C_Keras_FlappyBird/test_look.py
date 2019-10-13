@@ -22,19 +22,24 @@ IMAGE_COLS = 84
 BETA = 0.01
 
 #loss function for policy output
-def logloss(y_true, y_pred):     #policy loss
-	look_vars = y_pred[:,1:]
-	num_lactions = look_vars.shape[1] // 2
-	mu = look_vars[:,:num_lactions]
-	sigma_sq = look_vars[:,num_lactions:]
-	pdf = 1. / K.sqrt(2. * np.pi * sigma_sq) * K.exp(-K.square(y_true[:,1:] - mu) / (2. * sigma_sq))
-	log_pdf = K.sum(K.log(pdf + K.epsilon()), axis=-1)
-	return -(K.sum(K.log(y_true[:,0:1]*y_pred[:,0:1] + (1-y_true[:,0:1])*(1-y_pred[:,0:1]) + K.epsilon()), axis=-1) + log_pdf)
-	# BETA * K.sum(y_pred * K.log(y_pred + const) + (1-y_pred) * K.log(1-y_pred + const))   #regularisation term
+# def logloss(advantage):     #policy loss
+# 	def logloss_impl(y_true, y_pred):
+# 		look_vars = y_pred[:,1:]
+# 		num_lactions = look_vars.shape[1] // 2
+# 		mu = look_vars[:,:num_lactions]
+# 		sigma_sq = look_vars[:,num_lactions:]
+# 		pdf = 1. / K.sqrt(2. * np.pi * sigma_sq) * K.exp(-K.square(y_true[:,1:] - mu) / (2. * sigma_sq))
+# 		pdf_loss = K.sum(K.log(pdf + K.epsilon()), axis=-1)
+# 		act_loss = K.sum(K.log(y_true[:,0:1]*y_pred[:,0:1] + (1-y_true[:,0:1])*(1-y_pred[:,0:1]) + K.epsilon()), axis=-1)
+# 		act_entropy = K.sum(y_pred[:,0:1] * K.log(y_pred[:,0:1] + K.epsilon()) + (1-y_pred[:,0:1]) * K.log(1-y_pred[:,0:1] + K.epsilon()), axis=-1)
+# 		pdf_entropy = K.sum(0.5 * (K.log(2. * np.pi * sigma_sq) + 1.), axis=-1)
+# 		loss = -(pdf_loss + act_loss) * advantage - BETA * (act_entropy + pdf_entropy)
+# 		return loss
+# 	return logloss_impl
 
 #loss function for critic output
-def sumofsquares(y_true, y_pred):        #critic loss
-	return K.sum(K.square(y_pred - y_true), axis=-1)
+# def sumofsquares(y_true, y_pred):        #critic loss
+# 	return K.sum(K.square(y_pred - y_true), axis=-1)
 
 def preprocess(image, look_action):
 	crop_rows = IMAGE_ROWS * 3
@@ -54,17 +59,17 @@ def preprocess(image, look_action):
 	x = int(np.clip(x, min_x, max_x))
 	image = image[y-crop_rows//2:y+crop_rows//2, x-crop_cols//2:x+crop_cols//2]
 	image = skimage.transform.resize(image, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
-	image = skimage.exposure.rescale_intensity(image, in_range=(0,1), out_range=(0,255))
+	image = skimage.exposure.rescale_intensity(image, in_range=(0,1), out_range=(-1,1))
 	image = image.reshape(1, image.shape[0], image.shape[1], 1)
 	return image
 
-model = load_model("saved_models/model_updates250", custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
+model = load_model("saved_models/model_updates1800")#, custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
 game_state = game.GameState(30)
 
 currentScore = 0
 topScore = 0
 a_t = [1,0]
-look_action = np.array((0, 0.25))
+look_action = np.array((0, 0.0))
 FIRST_FRAME = True
 
 terminal = False
@@ -82,18 +87,18 @@ while True:
 		plt.show()
 		s_t = np.append(x_t, s_t[:, :, :, :3], axis=3)
 	
-	y = model.predict(s_t)[0][0]
-	no = np.random.random()	
-	no = np.random.rand()
-	a_t = [0,1] if no < y[0] else [1,0]    #stochastic policy
-	#a_t = [0,1] if 0.5 <y[0] else [1,0]   #deterministic policy
+	out = model.predict(s_t)[0][0]
 
-	look_vars = y[1:]
-	num_lactions = look_vars.shape[0] // 2
-	mu = look_vars[:num_lactions]
-	sigma_sq = look_vars[num_lactions:]
+	num_actions = out.shape[0] // 2
+	mu = out[:num_actions]
+	sigma_sq = out[num_actions:]
 	eps = np.random.randn(mu.shape[0])
-	look_action = mu + np.sqrt(sigma_sq) * eps
+	actions = mu + np.sqrt(sigma_sq) * eps
+	look_action = actions[1:]
+
+	# no = np.random.rand()
+	# a_t = [0,1] if no < actions[0] else [1,0]  #stochastic action
+	a_t = [0,1] if 0.0 < actions[0] else [1,0]  #deterministic action
 	
 	if(r_t == 1):
 		currentScore += 1
