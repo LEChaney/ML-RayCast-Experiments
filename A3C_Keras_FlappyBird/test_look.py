@@ -17,8 +17,10 @@ import keras.backend as K
 
 import matplotlib.pyplot as plt
 
-IMAGE_ROWS = 85
-IMAGE_COLS = 84
+NUM_CROPS = 3
+IMAGE_CHANNELS = 4 * NUM_CROPS
+IMAGE_ROWS = 28
+IMAGE_COLS = 28
 BETA = 0.01
 
 #loss function for policy output
@@ -42,26 +44,34 @@ BETA = 0.01
 # 	return K.sum(K.square(y_pred - y_true), axis=-1)
 
 def preprocess(image, look_action):
-	crop_rows = IMAGE_ROWS * 3
-	crop_cols = IMAGE_COLS * 3
-	min_y = crop_rows // 2
-	min_x = crop_cols // 2
-	max_y = image.shape[0] - crop_rows//2
-	max_x = image.shape[1] - crop_cols//2
-	range_y = max_y - min_y
-	range_x = max_x - min_x
+	def crop(img, look_action, crop_height, crop_width):
+		crop_height = min(crop_height, img.shape[0])
+		crop_width = min(crop_width, img.shape[1])
+		min_y = crop_height // 2
+		min_x = crop_width // 2
+		max_y = max(img.shape[0] - crop_height//2, min_y)
+		max_x = max(img.shape[1] - crop_width//2, min_x)
+		range_y = max_y - min_y
+		range_x = max_x - min_x
 
-	image = skimage.color.rgb2gray(image)
-	y_norm, x_norm = (look_action + 1) / 2
-	y = min_y + y_norm * range_y
-	x = min_x + x_norm * range_x
-	y = int(np.clip(y, min_y, max_y))
-	x = int(np.clip(x, min_x, max_x))
-	image = image[y-crop_rows//2:y+crop_rows//2, x-crop_cols//2:x+crop_cols//2]
-	image = skimage.transform.resize(image, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
-	image = skimage.exposure.rescale_intensity(image, in_range=(0,1), out_range=(-1,1))
-	image = image.reshape(1, image.shape[0], image.shape[1], 1)
-	return image
+		img = skimage.color.rgb2gray(img)
+		y_norm, x_norm = (look_action + 1) / 2
+		y = min_y + y_norm * range_y
+		x = min_x + x_norm * range_x
+		y = int(np.clip(y, min_y, max_y))
+		x = int(np.clip(x, min_x, max_x))
+		return img[y-crop_height//2:y+crop_height//2, x-crop_width//2:x+crop_width//2]
+	
+	images = np.empty((1, IMAGE_ROWS, IMAGE_COLS, NUM_CROPS))
+	for i in range(0, NUM_CROPS):
+		max_dim = max(image.shape[0], image.shape[1])
+		img = crop(image, look_action, max_dim // (2**i), max_dim // (2**i))
+		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
+		img = skimage.exposure.rescale_intensity(img, in_range=(0,1), out_range=(-1,1))
+		img = img.reshape(1, img.shape[0], img.shape[1])
+		images[:,:,:,i] = img
+
+	return images
 
 model = load_model("saved_models/model_updates1800")#, custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
 game_state = game.GameState(30)
@@ -83,9 +93,13 @@ while True:
 	else:
 		x_t, r_t, terminal = game_state.frame_step(a_t)
 		x_t = preprocess(x_t, look_action)
-		plt.imshow(x_t[0,:,:,0])
-		plt.show()
-		s_t = np.append(x_t, s_t[:, :, :, :3], axis=3)
+		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS])
+		# plt.show()
+		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS+1])
+		# plt.show()
+		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS+2])
+		# plt.show()
+		s_t = np.append(x_t, s_t[:, :, :, :IMAGE_CHANNELS-NUM_CROPS], axis=3)
 	
 	out = model.predict(s_t)[0][0]
 

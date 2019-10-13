@@ -30,12 +30,14 @@ import math
 import matplotlib.pyplot as plt
 
 GAMMA = 0.99                #discount value
-BETA = 0.01                 #regularisation coefficient
-IMAGE_ROWS = 85
-IMAGE_COLS = 84
+BETA = 0.001                #regularisation coefficient
+IMAGE_ROWS = 28
+IMAGE_COLS = 28
 NUM_CROPS = 3
-IMAGE_CHANNELS = 4 * NUM_CROPS
-LEARNING_RATE = 1e-5
+TIME_SLICES = 4
+EXTRA_ACTIONS = 2
+IMAGE_CHANNELS = TIME_SLICES * NUM_CROPS
+LEARNING_RATE = 1e-4
 EPISODE = 0
 THREADS = 16
 t_max = 5  
@@ -43,6 +45,7 @@ T = 0
 
 episode_r = []
 episode_state = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+episode_look_state = np.zeros((0, EXTRA_ACTIONS * TIME_SLICES))
 episode_output = np.empty((0, 3), dtype=np.float32)
 episode_critic = []
 
@@ -76,7 +79,9 @@ def buildmodel():
 	S = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
 	h0 = Convolution2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(S)
 	h1 = Convolution2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(h0)
+	L = Input(shape = (EXTRA_ACTIONS * TIME_SLICES,), name = 'LookState')
 	h2 = Flatten()(h1)
+	h2 = Concatenate()([L, h2])
 	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros') (h2)
 	P_mu = Dense(3, activation = 'tanh', kernel_initializer = 'glorot_uniform', bias_initializer = 'zeros') (h3)
 	P_sigma = Dense(3, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3)
@@ -84,8 +89,8 @@ def buildmodel():
 	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3)
 	
 	A = Input(shape = (1,), name = 'Advantage')
-	model = Model(inputs = S, outputs = [P,V])
-	model_trian = Model(inputs = [S,A], outputs = [P,V])
+	model = Model(inputs = [S,L], outputs = [P,V])
+	model_trian = Model(inputs = [S,L,A], outputs = [P,V])
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
 	optimizer = Adam(lr = LEARNING_RATE)
 	model_trian.compile(loss = {'o_P': logloss(A), 'o_V': sumofsquares}, loss_weights = {'o_P': 1., 'o_V' : 0.5}, optimizer = optimizer)
@@ -113,7 +118,8 @@ def preprocess(image, look_action):
 	
 	images = np.empty((1, IMAGE_ROWS, IMAGE_COLS, NUM_CROPS))
 	for i in range(0, NUM_CROPS):
-		img = crop(image, look_action, IMAGE_ROWS * 2**i, IMAGE_COLS * 2**i)
+		max_dim = max(image.shape[0], image.shape[1])
+		img = crop(image, look_action, max_dim // (2**i), max_dim // (2**i))
 		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
 		img = skimage.exposure.rescale_intensity(img, in_range=(0,1), out_range=(-1,1))
 		img = img.reshape(1, img.shape[0], img.shape[1])
@@ -139,7 +145,7 @@ for i in range(0,THREADS):
 	game_state.append(game.GameState(30000))
 
 
-def runprocess(thread_id, s_t):
+def runprocess(thread_id, s_t, look_state):
 	global T
 	global a_t
 	global model
@@ -150,18 +156,21 @@ def runprocess(thread_id, s_t):
 	r_t = 0
 	r_store = []
 	state_store = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+	look_state_store = np.zeros((0, EXTRA_ACTIONS * TIME_SLICES))
 	output_store = np.empty((0, 3), dtype=np.float32)
 	critic_store = []
 	s_t = s_t.reshape(1, s_t.shape[0], s_t.shape[1], s_t.shape[2])
+	look_state = look_state.reshape(1, look_state.shape[0])
 
 	while t-t_start < t_max and terminal == False:
 		t += 1
 		T += 1
 		intermediate_output = 0	
 
+
 		with graph.as_default():
-			out = model.predict(s_t)[0][0]		
-			intermediate_output = intermediate_layer_model.predict(s_t)
+			out = model.predict([s_t, look_state])[0][0]		
+			intermediate_output = intermediate_layer_model.predict([s_t, look_state])
 
 		num_actions = out.shape[0] // 2
 		mu = out[:num_actions]
@@ -178,7 +187,7 @@ def runprocess(thread_id, s_t):
 		x_t = preprocess(x_t, look_action)
 
 		with graph.as_default():
-			critic_reward = model.predict(s_t)[1]
+			critic_reward = model.predict([s_t, look_state])[1]
 
 		# y = 0 if a_t[0] == 1 else 1
 		# y = np.hstack((y, look_action))
@@ -187,10 +196,13 @@ def runprocess(thread_id, s_t):
 		actions = np.reshape(actions, (1, -1))
 		r_store = np.append(r_store, r_t)
 		state_store = np.append(state_store, s_t, axis = 0)
+		look_state_store = np.append(look_state_store, look_state, axis = 0)
 		output_store = np.append(output_store, actions, axis=0)
 		critic_store = np.append(critic_store, critic_reward)
 		
+		look_action = look_action.reshape((1, -1))
 		s_t = np.append(x_t, s_t[:, :, :, :IMAGE_CHANNELS-NUM_CROPS], axis=3)
+		look_state = np.append(look_action, look_state[:, :EXTRA_ACTIONS * (TIME_SLICES - 1)], axis=-1)
 		print("Frame = " + str(T) + ", Updates = " + str(EPISODE) + ", Thread = " + str(thread_id) + ", Action = " + str(a_t) + ", " + str(actions) + ", Output = "+ str(intermediate_output))
 	
 	if terminal == False:
@@ -202,7 +214,7 @@ def runprocess(thread_id, s_t):
 	for i in range(2,len(r_store)+1):
 		r_store[len(r_store)-i] = r_store[len(r_store)-i] + GAMMA*r_store[len(r_store)-i + 1]
 
-	return s_t, state_store, output_store, r_store, critic_store
+	return s_t, look_state, state_store, look_state_store, output_store, r_store, critic_store
 
 #function to decrease the learning rate after every epoch. In this manner, the learning rate reaches 0, by 20,000 epochs
 def step_decay(epoch):
@@ -212,44 +224,54 @@ def step_decay(epoch):
 	return lrate
 
 class actorthread(threading.Thread):
-	def __init__(self,thread_id, s_t):
+	def __init__(self,thread_id, s_t, look_state):
 		threading.Thread.__init__(self)
 		self.thread_id = thread_id
 		self.next_state = s_t
+		self.next_look_state = look_state
 
 	def run(self):
 		global episode_output
 		global episode_r
 		global episode_critic
 		global episode_state
+		global episode_look_state
 
 		threadLock.acquire()
-		self.next_state, state_store, output_store, r_store, critic_store = runprocess(self.thread_id, self.next_state)
+		self.next_state, self.next_look_state, state_store, look_state_store, output_store, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_look_state)
 		self.next_state = self.next_state.reshape(self.next_state.shape[1], self.next_state.shape[2], self.next_state.shape[3])
+		self.next_look_state = self.next_look_state.reshape(self.next_look_state.shape[1])
 
 		episode_r = np.append(episode_r, r_store)
 		episode_output = np.append(episode_output, output_store, axis=0)
 		episode_state = np.append(episode_state, state_store, axis = 0)
+		episode_look_state = np.append(episode_look_state, look_state_store, axis = 0)
 		episode_critic = np.append(episode_critic, critic_store)
 
 		threadLock.release()
 
 states = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+look_states = np.zeros((0, EXTRA_ACTIONS * TIME_SLICES))
 
 #initializing state of each thread
 for i in range(0, len(game_state)):
+	look_action = np.array((0, 0))
 	image = game_state[i].getCurrentFrame()
-	image = preprocess(image, np.array((0, 0)))
+	image = preprocess(image, look_action)
 	state = np.concatenate((image, image, image, image), axis=3)
 	states = np.append(states, state, axis = 0)
+	look_action = look_action.reshape((1, -1))
+	look_state = np.concatenate((look_action, look_action, look_action, look_action), axis=-1)
+	look_states = np.append(look_states, look_state, axis=0)
 
 while True:	
 	threadLock = threading.Lock()
 	threads = []
 	for i in range(0,THREADS):
-		threads.append(actorthread(i,states[i]))
+		threads.append(actorthread(i, states[i], look_states[i]))
 
 	states = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+	look_states = np.zeros((0, EXTRA_ACTIONS * TIME_SLICES))
 
 	for i in range(0,THREADS):
 		threads[i].start()
@@ -260,6 +282,7 @@ while True:
 
 	for i in range(0,THREADS):
 		state = threads[i].next_state
+		look_state = threads[i].next_look_state
 		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS])
 		# plt.show()
 		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS+1])
@@ -267,7 +290,9 @@ while True:
 		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS+2])
 		# plt.show()
 		state = state.reshape(1, state.shape[0], state.shape[1], state.shape[2])
+		look_state = look_state.reshape(1, look_state.shape[0])
 		states = np.append(states, state, axis = 0)
+		look_states = np.append(look_states, look_state, axis = 0)
 
 	e_mean = np.mean(episode_r)
 	#advantage calculation for each action taken
@@ -279,11 +304,12 @@ while True:
 	# callbacks_list = [lrate]
 
 	#backpropagation
-	history = model_train.fit([episode_state, advantage], {'o_P': episode_output, 'o_V': episode_r}, epochs = EPISODE + 1, batch_size = len(episode_output), initial_epoch = EPISODE)
+	history = model_train.fit([episode_state, episode_look_state, advantage], {'o_P': episode_output, 'o_V': episode_r}, epochs = EPISODE + 1, batch_size = len(episode_output), initial_epoch = EPISODE)
 
 	episode_r = []
 	episode_output = np.empty((0, 3), dtype=np.float32)
 	episode_state = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+	episode_look_state = np.zeros((0, EXTRA_ACTIONS * TIME_SLICES))
 	episode_critic = []
 
 	f = open("rewards.txt","a")
