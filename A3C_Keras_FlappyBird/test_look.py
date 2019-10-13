@@ -37,21 +37,28 @@ def sumofsquares(y_true, y_pred):        #critic loss
 	return K.sum(K.square(y_pred - y_true), axis=-1)
 
 def preprocess(image, look_action):
-	image = skimage.color.rgb2gray(image)
-	y_norm, x_norm = look_action
-	y = (y_norm + 1) / 2 * image.shape[0]
-	x = (x_norm + 1) / 2 * image.shape[1]
 	crop_rows = IMAGE_ROWS * 3
 	crop_cols = IMAGE_COLS * 3
-	y = int(np.clip(y, crop_rows//2, image.shape[0]-crop_rows//2))
-	x = int(np.clip(x, crop_cols//2, image.shape[1]-crop_cols//2))
+	min_y = crop_rows // 2
+	min_x = crop_cols // 2
+	max_y = image.shape[0] - crop_rows//2
+	max_x = image.shape[1] - crop_cols//2
+	range_y = max_y - min_y
+	range_x = max_x - min_x
+
+	image = skimage.color.rgb2gray(image)
+	y_norm, x_norm = (look_action + 1) / 2
+	y = min_y + y_norm * range_y
+	x = min_x + x_norm * range_x
+	y = int(np.clip(y, min_y, max_y))
+	x = int(np.clip(x, min_x, max_x))
 	image = image[y-crop_rows//2:y+crop_rows//2, x-crop_cols//2:x+crop_cols//2]
 	image = skimage.transform.resize(image, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
 	image = skimage.exposure.rescale_intensity(image, in_range=(0,1), out_range=(0,255))
 	image = image.reshape(1, image.shape[0], image.shape[1], 1)
 	return image
 
-model = load_model("saved_models/model_updates50", custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
+model = load_model("saved_models/model_updates250", custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
 game_state = game.GameState(30)
 
 currentScore = 0
