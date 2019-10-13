@@ -17,7 +17,7 @@ import keras.backend as K
 
 import matplotlib.pyplot as plt
 
-IMAGE_ROWS = 84
+IMAGE_ROWS = 85
 IMAGE_COLS = 84
 BETA = 0.01
 
@@ -39,19 +39,19 @@ def sumofsquares(y_true, y_pred):        #critic loss
 def preprocess(image, look_action):
 	image = skimage.color.rgb2gray(image)
 	y_norm, x_norm = look_action
-	y = y_norm * image.shape[0]
-	x = x_norm * image.shape[1]
+	y = (y_norm + 1) / 2 * image.shape[0]
+	x = (x_norm + 1) / 2 * image.shape[1]
 	crop_rows = IMAGE_ROWS * 3
 	crop_cols = IMAGE_COLS * 3
-	y = int(np.clip(y, 0, image.shape[0]-crop_rows))
-	x = int(np.clip(x, 0, image.shape[1]-crop_cols))
-	image = image[y:y+crop_rows, x:x+crop_cols]
+	y = int(np.clip(y, crop_rows//2, image.shape[0]-crop_rows//2))
+	x = int(np.clip(x, crop_cols//2, image.shape[1]-crop_cols//2))
+	image = image[y-crop_rows//2:y+crop_rows//2, x-crop_cols//2:x+crop_cols//2]
 	image = skimage.transform.resize(image, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
 	image = skimage.exposure.rescale_intensity(image, in_range=(0,1), out_range=(0,255))
 	image = image.reshape(1, image.shape[0], image.shape[1], 1)
 	return image
 
-model = load_model("saved_models/model_updates350", custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
+model = load_model("saved_models/model_updates50", custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
 game_state = game.GameState(30)
 
 currentScore = 0

@@ -96,7 +96,7 @@ def preprocess(image, look_action):
 	crop_cols = IMAGE_COLS * 3
 	y = int(np.clip(y, crop_rows//2, image.shape[0]-crop_rows//2))
 	x = int(np.clip(x, crop_cols//2, image.shape[1]-crop_cols//2))
-	image = image[y:y+crop_rows, x:x+crop_cols]
+	image = image[y-crop_rows//2:y+crop_rows//2, x-crop_cols//2:x+crop_cols//2]
 	image = skimage.transform.resize(image, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
 	image = skimage.exposure.rescale_intensity(image, in_range=(0,1), out_range=(0,255))
 	image = image.reshape(1, image.shape[0], image.shape[1], 1)
