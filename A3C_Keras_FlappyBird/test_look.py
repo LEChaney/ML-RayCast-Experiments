@@ -17,6 +17,8 @@ import keras.backend as K
 
 import matplotlib.pyplot as plt
 
+TIME_SLICES = 4
+EXTRA_ACTIONS = 2
 NUM_CROPS = 3
 IMAGE_CHANNELS = 4 * NUM_CROPS
 IMAGE_ROWS = 28
@@ -89,19 +91,22 @@ while True:
 		x_t = game_state.getCurrentFrame()
 		x_t = preprocess(x_t, look_action)
 		s_t = np.concatenate((x_t, x_t, x_t, x_t), axis=3)
+		look_action = look_action.reshape((1, -1))
+		look_state = np.concatenate((look_action, look_action, look_action, look_action), axis=-1)
 		FIRST_FRAME = False		
 	else:
 		x_t, r_t, terminal = game_state.frame_step(a_t)
 		x_t = preprocess(x_t, look_action)
-		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS])
-		# plt.show()
-		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS+1])
-		# plt.show()
-		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS+2])
-		# plt.show()
+		plt.imshow(x_t[0, :, :, 0])
+		plt.show()
+		plt.imshow(x_t[0, :, :, 1])
+		plt.show()
+		plt.imshow(x_t[0, :, :, 2])
+		plt.show()
+		look_action = look_action.reshape((1, -1))
 		s_t = np.append(x_t, s_t[:, :, :, :IMAGE_CHANNELS-NUM_CROPS], axis=3)
-	
-	out = model.predict(s_t)[0][0]
+		look_state = np.append(look_action, look_state[:, :EXTRA_ACTIONS * (TIME_SLICES - 1)], axis=-1)
+	out = model.predict([s_t, look_state])[0][0]
 
 	num_actions = out.shape[0] // 2
 	mu = out[:num_actions]
