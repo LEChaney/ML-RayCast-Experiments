@@ -23,7 +23,12 @@ NUM_CROPS = 3
 IMAGE_CHANNELS = 4 * NUM_CROPS
 IMAGE_ROWS = 28
 IMAGE_COLS = 28
+NUM_ACTIONS = EXTRA_ACTIONS + 1
 BETA = 0.01
+LOSS_CLIPPING = 0.2
+
+DUMMY_ADVANTAGE = K.zeros((1, NUM_ACTIONS))
+DUMMY_OLD_PRED  = K.zeros((1, NUM_ACTIONS * 2))
 
 #loss function for policy output
 # def logloss(advantage):     #policy loss
@@ -44,6 +49,26 @@ BETA = 0.01
 #loss function for critic output
 # def sumofsquares(y_true, y_pred):        #critic loss
 # 	return K.sum(K.square(y_pred - y_true), axis=-1)
+
+def ppo_loss(advantage, old_pred):
+	def loss(y_true, y_pred):
+		mu_pred = y_pred[:,:NUM_ACTIONS]
+		var_pred = y_pred[:,NUM_ACTIONS:]
+		mu_old_pred = old_pred[:,:NUM_ACTIONS]
+		var_old_pred = old_pred[:,NUM_ACTIONS:]
+		denom = K.sqrt(2 * np.pi * var_pred)
+		denom_old = K.sqrt(2 * np.pi * var_old_pred)
+		prob_num = K.exp(- K.square(y_true - mu_pred) / (2 * var_pred))
+		old_prob_num = K.exp(- K.square(y_true - mu_old_pred) / (2 * var_old_pred))
+
+		prob = prob_num/denom
+		old_prob = old_prob_num/denom_old
+		r = prob/(old_prob + 1e-10)
+
+		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
+
+		return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + BETA * entropy)
+	return loss
 
 def preprocess(image, look_action):
 	def crop(img, look_action, crop_height, crop_width):
@@ -75,13 +100,13 @@ def preprocess(image, look_action):
 
 	return images
 
-model = load_model("saved_models/model_updates1800")#, custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
+model = load_model("saved_models/model_updates700", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
 game_state = game.GameState(30)
 
 currentScore = 0
 topScore = 0
 a_t = [1,0]
-look_action = np.array((0, 0.0))
+actions = np.array((0, 0, 0.0))
 FIRST_FRAME = True
 
 terminal = False
@@ -89,31 +114,29 @@ r_t = 0
 while True:
 	if FIRST_FRAME:
 		x_t = game_state.getCurrentFrame()
-		x_t = preprocess(x_t, look_action)
+		x_t = preprocess(x_t, actions[1:])
 		s_t = np.concatenate((x_t, x_t, x_t, x_t), axis=3)
-		look_action = look_action.reshape((1, -1))
-		look_state = np.concatenate((look_action, look_action, look_action, look_action), axis=-1)
+		actions = actions.reshape((1, -1))
+		action_state = np.concatenate((actions, actions, actions, actions), axis=-1)
 		FIRST_FRAME = False		
 	else:
 		x_t, r_t, terminal = game_state.frame_step(a_t)
-		x_t = preprocess(x_t, look_action)
-		plt.imshow(x_t[0, :, :, 0])
-		plt.show()
-		plt.imshow(x_t[0, :, :, 1])
-		plt.show()
-		plt.imshow(x_t[0, :, :, 2])
-		plt.show()
-		look_action = look_action.reshape((1, -1))
-		s_t = np.append(x_t, s_t[:, :, :, :IMAGE_CHANNELS-NUM_CROPS], axis=3)
-		look_state = np.append(look_action, look_state[:, :EXTRA_ACTIONS * (TIME_SLICES - 1)], axis=-1)
-	out = model.predict([s_t, look_state])[0][0]
+		x_t = preprocess(x_t, actions[1:])
+		# plt.imshow(x_t[0, :, :, 0])
+		# plt.show()
+		# plt.imshow(x_t[0, :, :, 1])
+		# plt.show()
+		# plt.imshow(x_t[0, :, :, 2])
+		# plt.show()
+		actions = actions.reshape((1, -1))
+		s_t = np.append(x_t, s_t[:, :, :, :-NUM_CROPS], axis=3)
+		action_state = np.append(actions, action_state[:, :-NUM_ACTIONS], axis=-1)
+	out = model.predict([s_t, action_state])[0][0]
 
-	num_actions = out.shape[0] // 2
-	mu = out[:num_actions]
-	sigma_sq = out[num_actions:]
+	mu = out[:NUM_ACTIONS]
+	sigma_sq = out[NUM_ACTIONS:]
 	eps = np.random.randn(mu.shape[0])
 	actions = mu + np.sqrt(sigma_sq) * eps
-	look_action = actions[1:]
 
 	# no = np.random.rand()
 	# a_t = [0,1] if no < actions[0] else [1,0]  #stochastic action

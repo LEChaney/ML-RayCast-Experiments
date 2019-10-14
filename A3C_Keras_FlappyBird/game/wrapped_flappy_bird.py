@@ -17,7 +17,7 @@ SCREEN = pygame.display.set_mode((SCREENWIDTH, SCREENHEIGHT))
 pygame.display.set_caption('Flappy Bird')
 
 IMAGES, SOUNDS, HITMASKS = flappy_bird_utils.load()
-PIPEGAPSIZE = 100 # gap between upper and lower part of pipe
+PIPEGAPSIZE = 150 # gap between upper and lower part of pipe
 BASEY = SCREENHEIGHT * 1
 
 PLAYER_WIDTH = IMAGES['player'][0].get_width()  #images array is obtained from flappy_bird_utils above
