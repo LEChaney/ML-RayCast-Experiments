@@ -52,14 +52,14 @@ T_MAX = BUFFER_SIZE // THREADS
 T = 0
 EPISODE = 0
 
-episode_r = np.empty((0, NUM_ACTIONS), dtype=np.float32)
+episode_r = np.empty((0, 1), dtype=np.float32)
 episode_state = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
 episode_action_state = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
 episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
 episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
-episode_critic = np.empty((0, NUM_ACTIONS), dtype=np.float32)
+episode_critic = np.empty((0, 1), dtype=np.float32)
 
-DUMMY_ADVANTAGE = np.zeros((1, NUM_ACTIONS))
+DUMMY_ADVANTAGE = np.zeros((1, 1))
 DUMMY_OLD_PRED  = np.zeros((1, NUM_ACTIONS * 2))
 
 ACTIONS = 2
@@ -93,14 +93,19 @@ def ppo_loss(advantage, old_pred):
 		old_prob = old_prob_num/denom_old
 		r = prob/(old_prob + 1e-10)
 
-		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
+		surr1 = r * advantage
+		surr2 = K.clip(r, (1 - LOSS_CLIPPING), (1 + LOSS_CLIPPING)) * advantage
+		aloss = -K.mean(K.minimum(surr1, surr2))
 
-		return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + BETA * entropy)
+		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
+		entropy_penalty = -BETA * K.mean(entropy)
+
+		return aloss + entropy_penalty
 	return loss
 
 #loss function for critic output
-def sumofsquares(y_true, y_pred):        #critic loss
-	return K.mean(K.square(y_pred - y_true))
+# def sumofsquares(y_true, y_pred):        #critic loss
+# 	return K.mean(K.square(y_pred - y_true))
 
 #function buildmodel() to define the structure of the neural network in use 
 def buildmodel():
@@ -118,17 +123,13 @@ def buildmodel():
 	h2 = Flatten()(h1)
 	h2 = Concatenate()([AS, h2])
 	
-	h3s = [Dense(256, activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros') (h2)] * NUM_ACTIONS
-	p_mus = [Dense(1, activation = 'tanh', kernel_initializer = 'glorot_uniform', bias_initializer = 'zeros') (h3s[i]) for i in range(NUM_ACTIONS)]
-	P_mu = Concatenate()(p_mus)
-	P_sigmas = [Dense(1, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3s[i]) for i in range(NUM_ACTIONS)]
-	P_sigma = Concatenate()(P_sigmas)
+	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros') (h2)
+	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', kernel_initializer = 'glorot_uniform', bias_initializer = 'zeros') (h3)
+	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
-
-	Vs = [Dense(1, kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3s[i]) for i in range(NUM_ACTIONS)]
-	V = Concatenate(name = 'o_V')(Vs)
+	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3)
 	
-	A = Input(shape = (NUM_ACTIONS,), name = 'Advantage')
+	A = Input(shape = (1,), name = 'Advantage')
 	O = Input(shape = (NUM_ACTIONS * 2,), name = 'Old_Prediction')
 	model = Model(inputs = [S,AS,A,O], outputs = [P,V])
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
@@ -193,12 +194,12 @@ def runprocess(thread_id, s_t, action_state):
 	t_start = t
 	terminal = False
 	r_t = 0
-	r_store = np.empty((0, NUM_ACTIONS), dtype=np.float32)
+	r_store = np.empty((0, 1), dtype=np.float32)
 	state_store = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
 	action_state_store = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
 	action_store = np.empty((0, NUM_ACTIONS), dtype=np.float32)
 	pred_store = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
-	critic_store = np.empty((0, NUM_ACTIONS), dtype=np.float32)
+	critic_store = np.empty((0, 1), dtype=np.float32)
 	s_t = s_t.reshape(1, s_t.shape[0], s_t.shape[1], s_t.shape[2])
 	action_state = action_state.reshape(1, action_state.shape[0])
 
@@ -237,7 +238,8 @@ def runprocess(thread_id, s_t, action_state):
 
 		actions = np.reshape(actions, (1, -1))
 		out = np.reshape(out, (1, -1))
-		r_store = np.append(r_store, [[r_t] * NUM_ACTIONS], axis = 0)
+		critic_reward = np.reshape(critic_reward, (1, -1))
+		r_store = np.append(r_store, [[r_t] * 1], axis = 0)
 		state_store = np.append(state_store, s_t, axis = 0)
 		action_state_store = np.append(action_state_store, action_state, axis = 0)
 		action_store = np.append(action_store, actions, axis=0)
@@ -251,7 +253,7 @@ def runprocess(thread_id, s_t, action_state):
 	if terminal == False:
 		r_store[len(r_store)-1] = critic_store[len(r_store)-1]
 	else:
-		r_store[len(r_store)-1] = [-1] * NUM_ACTIONS
+		r_store[len(r_store)-1] = [-1] * 1
 		s_t = np.concatenate((x_t, x_t, x_t, x_t), axis=3)
 	
 	for i in range(2,len(r_store)+1):
@@ -351,12 +353,12 @@ while True:
 	#backpropagation
 	history = model.fit([episode_state, episode_action_state, advantage, episode_pred], {'o_P': episode_action, 'o_V': episode_r}, callbacks = callbacks_list, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
-	episode_r = np.empty((0, NUM_ACTIONS), dtype=np.float32)
+	episode_r = np.empty((0, 1), dtype=np.float32)
 	episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 	episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
 	episode_state = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
 	episode_action_state = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
-	episode_critic = np.empty((0, NUM_ACTIONS), dtype=np.float32)
+	episode_critic = np.empty((0, 1), dtype=np.float32)
 
 	f = open("rewards.txt","a")
 	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]) + "\n")

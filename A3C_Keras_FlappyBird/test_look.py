@@ -66,9 +66,14 @@ def ppo_loss(advantage, old_pred):
 		old_prob = old_prob_num/denom_old
 		r = prob/(old_prob + 1e-10)
 
-		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
+		surr1 = r * advantage
+		surr2 = K.clip(r, (1 - LOSS_CLIPPING), (1 + LOSS_CLIPPING)) * advantage
+		aloss = -K.mean(K.minimum(surr1, surr2))
 
-		return -K.mean(K.minimum(r * advantage, K.clip(r, min_value=1 - LOSS_CLIPPING, max_value=1 + LOSS_CLIPPING) * advantage) + BETA * entropy)
+		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
+		entropy_penalty = -BETA * K.mean(entropy)
+
+		return aloss + entropy_penalty
 	return loss
 
 def preprocess(image, look_action):
@@ -101,7 +106,7 @@ def preprocess(image, look_action):
 
 	return images
 
-model = load_model("saved_models/model_updates700", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
+model = load_model("saved_models/model_updates100", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
 game_state = game.GameState(30)
 
 currentScore = 0
