@@ -13,6 +13,7 @@ from keras.models import Sequential, Model, load_model
 from keras.layers.core import Dense, Flatten, Activation
 from keras.layers.convolutional import Convolution2D
 from keras.optimizers import RMSprop
+from coord import CoordinateChannel2D
 import keras.backend as K
 
 import matplotlib.pyplot as plt
@@ -140,7 +141,7 @@ while True:
 
 	# no = np.random.rand()
 	# a_t = [0,1] if no < actions[0] else [1,0]  #stochastic action
-	a_t = [0,1] if 0.0 < actions[0] else [1,0]  #deterministic action
+	a_t = [0,1] if 0.5 < actions[0] else [1,0]  #deterministic action
 	
 	if(r_t == 1):
 		currentScore += 1

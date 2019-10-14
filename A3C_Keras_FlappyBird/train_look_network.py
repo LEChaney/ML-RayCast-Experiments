@@ -2,6 +2,8 @@ import numpy as np
 import sys
 sys.path.append("game/")
 
+from coord import CoordinateChannel2D
+
 import skimage
 from skimage import transform, color, exposure
 
@@ -109,8 +111,10 @@ def buildmodel():
 
 	S = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
 	AS = Input(shape = (NUM_ACTIONS * TIME_SLICES,), name = 'Action_State')
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(S)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(h0)
+	h0 = CoordinateChannel2D()(S)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(h0)
+	h1 = CoordinateChannel2D()(h0)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(h1)
 	h2 = Flatten()(h1)
 	h2 = Concatenate()([AS, h2])
 	
