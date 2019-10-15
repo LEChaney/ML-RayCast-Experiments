@@ -33,11 +33,12 @@ import matplotlib.pyplot as plt
 
 GAMMA = 0.99                #discount value
 BETA = 0.01                 #regularisation coefficient
-IMAGE_ROWS = 85
-IMAGE_COLS = 84
-NUM_CROPS = 1
+IMAGE_ROWS = 44
+IMAGE_COLS = 44
+ZOOM = 2
+NUM_CROPS = 3
 TIME_SLICES = 4
-EXTRA_ACTIONS = 0
+EXTRA_ACTIONS = 2
 NUM_NORMAL_ACTIONS = 1
 NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = TIME_SLICES * NUM_CROPS
@@ -139,8 +140,8 @@ def buildmodel():
 #function to preprocess an image before giving as input to the neural network
 def preprocess(image, look_action=np.array((0, 0))):
 	def crop(img, look_action, crop_height, crop_width):
-		crop_height = min(crop_height, img.shape[0])
-		crop_width = min(crop_width, img.shape[1])
+		crop_height = min(int(crop_height), img.shape[0])
+		crop_width = min(int(crop_width), img.shape[1])
 		min_y = crop_height // 2
 		min_x = crop_width // 2
 		max_y = max(img.shape[0] - crop_height//2, min_y)
@@ -162,9 +163,10 @@ def preprocess(image, look_action=np.array((0, 0))):
 	images = np.empty((1, IMAGE_ROWS, IMAGE_COLS, NUM_CROPS))
 	for i in range(0, NUM_CROPS):
 		max_dim = max(image.shape[0], image.shape[1])
-		img = crop(image, look_action, max_dim // (2**i), max_dim // (2**i))
-		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
-		img = skimage.exposure.rescale_intensity(img, out_range=(0,255))
+		img = crop(image, look_action, max_dim // (ZOOM**i), max_dim // (ZOOM**i))
+		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')
+		if img.min() != img.max(): # Prevent NaNs
+			img = skimage.exposure.rescale_intensity(img, out_range=(0,255))
 		img = img.reshape(1, img.shape[0], img.shape[1])
 		images[:,:,:,i] = img
 

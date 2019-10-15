@@ -20,14 +20,15 @@ import keras.backend as K
 import matplotlib.pyplot as plt
 
 TIME_SLICES = 4
-EXTRA_ACTIONS = 0
-NUM_CROPS = 1
+EXTRA_ACTIONS = 2
+NUM_CROPS = 3
 IMAGE_CHANNELS = 4 * NUM_CROPS
-IMAGE_ROWS = 85
-IMAGE_COLS = 84
+IMAGE_ROWS = 44
+IMAGE_COLS = 44
 NUM_ACTIONS = EXTRA_ACTIONS + 1
 BETA = 0.01
 LOSS_CLIPPING = 0.2
+ZOOM = 2
 
 DUMMY_ADVANTAGE = K.zeros((1, NUM_ACTIONS))
 DUMMY_OLD_PRED  = K.zeros((1, NUM_ACTIONS * 2))
@@ -79,8 +80,8 @@ def ppo_loss(advantage, old_pred):
 
 def preprocess(image, look_action):
 	def crop(img, look_action, crop_height, crop_width):
-		crop_height = min(crop_height, img.shape[0])
-		crop_width = min(crop_width, img.shape[1])
+		crop_height = min(int(crop_height), img.shape[0])
+		crop_width = min(int(crop_width), img.shape[1])
 		min_y = crop_height // 2
 		min_x = crop_width // 2
 		max_y = max(img.shape[0] - crop_height//2, min_y)
@@ -104,13 +105,14 @@ def preprocess(image, look_action):
 		max_dim = max(image.shape[0], image.shape[1])
 		img = crop(image, look_action, max_dim // (2**i), max_dim // (2**i))
 		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
-		img = skimage.exposure.rescale_intensity(img, out_range=(0,255))
+		if img.min() != img.max(): # Prevent NaNs
+			img = skimage.exposure.rescale_intensity(img, out_range=(0,255))
 		img = img.reshape(1, img.shape[0], img.shape[1])
 		images[:,:,:,i] = img
 
 	return images
 
-model = load_model("saved_models/model_updates450", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
+model = load_model("saved_models/model_updates1140", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
 game_state = game.GameState(30)
 
 currentScore = 0
@@ -136,8 +138,8 @@ while True:
 		# TODO: Tidy
 		for i in range(NUM_CROPS):
 			max_dim = max(x_t.shape[0], x_t.shape[1])
-			crop_height = min(max_dim // (2**i), x_t.shape[0])
-			crop_width = min(max_dim // (2**i), x_t.shape[1])
+			crop_height = min(int(max_dim // (ZOOM**i)), x_t.shape[0])
+			crop_width = min(int(max_dim // (ZOOM**i)), x_t.shape[1])
 			min_y = crop_height // 2
 			min_x = crop_width // 2
 			max_y = max(x_t.shape[0] - crop_height//2, min_y)
