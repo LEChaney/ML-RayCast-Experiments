@@ -3,6 +3,7 @@ import sys
 sys.path.append("game/")
 
 import pygame
+from pygame import Color, Rect
 import wrapped_flappy_bird as game
 
 import skimage
@@ -106,7 +107,7 @@ def preprocess(image, look_action):
 
 	return images
 
-model = load_model("saved_models/model_updates100", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
+model = load_model("saved_models/model_updates2750", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
 game_state = game.GameState(30)
 
 currentScore = 0
@@ -127,13 +128,35 @@ while True:
 		FIRST_FRAME = False		
 	else:
 		x_t, r_t, terminal = game_state.frame_step(a_t)
+
+		for i in range(NUM_CROPS):
+			max_dim = max(x_t.shape[0], x_t.shape[1])
+			crop_height = min(max_dim // (2**i), x_t.shape[0])
+			crop_width = min(max_dim // (2**i), x_t.shape[1])
+			min_y = crop_height // 2
+			min_x = crop_width // 2
+			max_y = max(x_t.shape[0] - crop_height//2, min_y)
+			max_x = max(x_t.shape[1] - crop_width//2, min_x)
+			range_y = max_y - min_y
+			range_x = max_x - min_x
+
+			y_norm, x_norm = (actions[1:] + 1) / 2
+			y = min_y + y_norm * range_y
+			x = min_x + x_norm * range_x
+			y = int(np.clip(y, min_y, max_y))
+			x = int(np.clip(x, min_x, max_x))
+			pygame.draw.rect(pygame.display.get_surface(), Color(255, 255, 255), Rect(y-crop_height//2, x-crop_width//2, crop_height, crop_width), 5)
+		pygame.display.update()
+
 		x_t = preprocess(x_t, actions[1:])
+
 		# plt.imshow(x_t[0, :, :, 0])
 		# plt.show()
 		# plt.imshow(x_t[0, :, :, 1])
 		# plt.show()
 		# plt.imshow(x_t[0, :, :, 2])
 		# plt.show()
+
 		actions = actions.reshape((1, -1))
 		s_t = np.append(x_t, s_t[:, :, :, :-NUM_CROPS], axis=3)
 		action_state = np.append(actions, action_state[:, :-NUM_ACTIONS], axis=-1)
