@@ -20,11 +20,11 @@ import keras.backend as K
 import matplotlib.pyplot as plt
 
 TIME_SLICES = 4
-EXTRA_ACTIONS = 2
-NUM_CROPS = 3
+EXTRA_ACTIONS = 0
+NUM_CROPS = 1
 IMAGE_CHANNELS = 4 * NUM_CROPS
-IMAGE_ROWS = 28
-IMAGE_COLS = 28
+IMAGE_ROWS = 85
+IMAGE_COLS = 84
 NUM_ACTIONS = EXTRA_ACTIONS + 1
 BETA = 0.01
 LOSS_CLIPPING = 0.2
@@ -96,24 +96,27 @@ def preprocess(image, look_action):
 		x = int(np.clip(x, min_x, max_x))
 		return img[y-crop_height//2:y+crop_height//2, x-crop_width//2:x+crop_width//2]
 	
+	if len(look_action) == 0:
+		look_action = np.array((0, 0))
+
 	images = np.empty((1, IMAGE_ROWS, IMAGE_COLS, NUM_CROPS))
 	for i in range(0, NUM_CROPS):
 		max_dim = max(image.shape[0], image.shape[1])
 		img = crop(image, look_action, max_dim // (2**i), max_dim // (2**i))
 		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
-		img = skimage.exposure.rescale_intensity(img, in_range=(0,1), out_range=(-1,1))
+		img = skimage.exposure.rescale_intensity(img, out_range=(0,255))
 		img = img.reshape(1, img.shape[0], img.shape[1])
 		images[:,:,:,i] = img
 
 	return images
 
-model = load_model("saved_models/model_updates2750", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
+model = load_model("saved_models/model_updates450", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
 game_state = game.GameState(30)
 
 currentScore = 0
 topScore = 0
 a_t = [1,0]
-actions = np.array((0, 0, 0.0))
+actions = np.array([0] * NUM_ACTIONS)
 FIRST_FRAME = True
 
 terminal = False
@@ -129,6 +132,8 @@ while True:
 	else:
 		x_t, r_t, terminal = game_state.frame_step(a_t)
 
+		# Visualize crops
+		# TODO: Tidy
 		for i in range(NUM_CROPS):
 			max_dim = max(x_t.shape[0], x_t.shape[1])
 			crop_height = min(max_dim // (2**i), x_t.shape[0])
@@ -140,7 +145,12 @@ while True:
 			range_y = max_y - min_y
 			range_x = max_x - min_x
 
-			y_norm, x_norm = (actions[1:] + 1) / 2
+			look_action = actions[1:]
+
+			if len(look_action) == 0:
+				look_action = np.array((0, 0))
+
+			y_norm, x_norm = (look_action + 1) / 2
 			y = min_y + y_norm * range_y
 			x = min_x + x_norm * range_x
 			y = int(np.clip(y, min_y, max_y))

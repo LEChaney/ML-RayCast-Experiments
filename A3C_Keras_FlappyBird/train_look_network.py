@@ -33,22 +33,21 @@ import matplotlib.pyplot as plt
 
 GAMMA = 0.99                #discount value
 BETA = 0.01                 #regularisation coefficient
-IMAGE_ROWS = 28
-IMAGE_COLS = 28
-NUM_CROPS = 3
+IMAGE_ROWS = 85
+IMAGE_COLS = 84
+NUM_CROPS = 1
 TIME_SLICES = 4
-EXTRA_ACTIONS = 2
+EXTRA_ACTIONS = 0
 NUM_NORMAL_ACTIONS = 1
 NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = TIME_SLICES * NUM_CROPS
 LEARNING_RATE = 1e-4
 LOSS_CLIPPING = 0.2
 
-BUFFER_SIZE = 256
-EPOCHS = 10
-BATCH_SIZE = 64
+EPOCHS = 3
 THREADS = 16
-T_MAX = BUFFER_SIZE // THREADS
+T_MAX = 15
+BATCH_SIZE = 80
 T = 0
 EPISODE = 0
 
@@ -117,17 +116,17 @@ def buildmodel():
 	S = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
 	AS = Input(shape = (NUM_ACTIONS * TIME_SLICES,), name = 'Action_State')
 	h0 = CoordinateChannel2D()(S)
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(h0)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h0)
 	h1 = CoordinateChannel2D()(h0)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros')(h1)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h1)
 	h2 = Flatten()(h1)
 	h2 = Concatenate()([AS, h2])
 	
-	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform', bias_initializer = 'zeros') (h2)
-	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', kernel_initializer = 'glorot_uniform', bias_initializer = 'zeros') (h3)
-	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3)
+	h3 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
+	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
+	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
-	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'zeros') (h3)
+	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
 	
 	A = Input(shape = (1,), name = 'Advantage')
 	O = Input(shape = (NUM_ACTIONS * 2,), name = 'Old_Prediction')
@@ -138,7 +137,7 @@ def buildmodel():
 	return model
 
 #function to preprocess an image before giving as input to the neural network
-def preprocess(image, look_action):
+def preprocess(image, look_action=np.array((0, 0))):
 	def crop(img, look_action, crop_height, crop_width):
 		crop_height = min(crop_height, img.shape[0])
 		crop_width = min(crop_width, img.shape[1])
@@ -157,12 +156,15 @@ def preprocess(image, look_action):
 		x = int(np.clip(x, min_x, max_x))
 		return img[y-crop_height//2:y+crop_height//2, x-crop_width//2:x+crop_width//2]
 	
+	if len(look_action) == 0:
+		look_action = np.array((0, 0))
+
 	images = np.empty((1, IMAGE_ROWS, IMAGE_COLS, NUM_CROPS))
 	for i in range(0, NUM_CROPS):
 		max_dim = max(image.shape[0], image.shape[1])
 		img = crop(image, look_action, max_dim // (2**i), max_dim // (2**i))
 		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')	
-		img = skimage.exposure.rescale_intensity(img, in_range=(0,1), out_range=(-1,1))
+		img = skimage.exposure.rescale_intensity(img, out_range=(0,255))
 		img = img.reshape(1, img.shape[0], img.shape[1])
 		images[:,:,:,i] = img
 
@@ -302,7 +304,7 @@ action_states = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
 
 #initializing state of each thread
 for i in range(0, len(game_state)):
-	action = np.array((0, 0, 0))
+	action = np.array([[0] * NUM_ACTIONS])
 	image = game_state[i].getCurrentFrame()
 	image = preprocess(image, action[1:])
 	state = np.concatenate((image, image, image, image), axis=3)
@@ -364,6 +366,6 @@ while True:
 	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]) + "\n")
 	f.close()
 
-	if EPISODE % 50 == 0: 
+	if EPISODE % (20 * EPOCHS) == 0: 
 		model.save("saved_models/model_updates" +	str(EPISODE)) 
-	EPISODE += 1
+	EPISODE += EPOCHS
