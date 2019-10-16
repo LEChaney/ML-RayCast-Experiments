@@ -312,9 +312,9 @@ def runprocess(thread_id, s_t, action_state):
 
 #function to decrease the learning rate after every epoch. In this manner, the learning rate reaches 0, by 20,000 epochs
 def step_decay(epoch):
-	decay = 3.2e-8
+	decay = LEARNING_RATE / 20000.
 	lrate = LEARNING_RATE - epoch*decay
-	lrate = max(lrate, 0)
+	lrate = max(lrate, 0.)
 	return lrate
 
 class actorthread(threading.Thread):
