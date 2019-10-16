@@ -45,7 +45,9 @@ NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = TIME_SLICES * NUM_CROPS
 LEARNING_RATE = 1e-4
 LOSS_CLIPPING = 0.2
-LOOK_SPEED = 0.1
+LOOK_SPEED = 0.00
+TEMPERATURE = 0
+TEMP_INCR = 1e-6
 
 EPOCHS = 3
 THREADS = 16
@@ -198,6 +200,7 @@ def runprocess(thread_id, s_t, action_state):
 	global T
 	global a_t
 	global model
+	global LOOK_SPEED
 
 	t = 0
 	t_start = t
@@ -215,6 +218,8 @@ def runprocess(thread_id, s_t, action_state):
 	while t-t_start < T_MAX and terminal == False:
 		t += 1
 		T += 1
+		LOOK_SPEED += TEMP_INCR
+		LOOK_SPEED = np.clip(LOOK_SPEED, 0, 0.1)
 
 		with graph.as_default():
 			out = model.predict([s_t, action_state, DUMMY_ADVANTAGE, DUMMY_OLD_PRED])[0][0]
@@ -275,9 +280,12 @@ def runprocess(thread_id, s_t, action_state):
 		# y = np.hstack((y, look_action))
 		# y = np.reshape(y, (1, -1))
 
+		action_and_look = np.append(actions[0:1], look_targets[thread_id])
+		action_and_look = action_and_look.reshape(1, -1)
 		actions = np.reshape(actions, (1, -1))
 		out = np.reshape(out, (1, -1))
 		critic_reward = np.reshape(critic_reward, (1, -1))
+
 		r_store = np.append(r_store, [[r_t] * 1], axis = 0)
 		state_store = np.append(state_store, s_t, axis = 0)
 		action_state_store = np.append(action_state_store, action_state, axis = 0)
@@ -286,7 +294,7 @@ def runprocess(thread_id, s_t, action_state):
 		critic_store = np.append(critic_store, critic_reward, axis=0)
 		
 		s_t = np.append(x_t, s_t[:, :, :, :-NUM_CROPS], axis=3)
-		action_state = np.append(actions, action_state[:, :-NUM_ACTIONS], axis=-1)
+		action_state = np.append(action_and_look, action_state[:, :-NUM_ACTIONS], axis=-1)
 		print("Frame = " + str(T) + ", Updates = " + str(EPISODE) + ", Thread = " + str(thread_id) + ", Action = " + str(a_t) + ", " + str(actions) + ", Output = "+ str(out))
 	
 	if terminal == False:
@@ -327,6 +335,7 @@ class actorthread(threading.Thread):
 		threadLock.acquire()
 		self.next_state, self.next_action_state, state_store, action_state_store, action_store, pred_store, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_action_state)
 		self.next_state = self.next_state.reshape(self.next_state.shape[1], self.next_state.shape[2], self.next_state.shape[3])
+		self.next_action_state = self.next_action_state.reshape(self.next_action_state.shape[1])
 
 		episode_r = np.append(episode_r, r_store, axis = 0)
 		episode_pred = np.append(episode_pred, pred_store, axis = 0)
@@ -378,7 +387,7 @@ while True:
 		# plt.show()
 		state = state.reshape(1, state.shape[0], state.shape[1], state.shape[2])
 		states = np.append(states, state, axis = 0)
-		action_state.reshape(1, -1)
+		action_state = action_state.reshape(1, -1)
 		action_states = np.append(action_states, action_state, axis = 0)
 
 	e_mean = np.mean(episode_r)
@@ -387,11 +396,11 @@ while True:
 	# advantage = np.reshape(advantage, (-1, 1))
 	print("backpropagating")
 
-	# lrate = LearningRateScheduler(step_decay)
-	# callbacks_list = [lrate]
+	lrate = LearningRateScheduler(step_decay)
+	callbacks_list = [lrate]
 
 	#backpropagation
-	history = model.fit([episode_state, episode_action_state, advantage, episode_pred], {'o_P': episode_action, 'o_V': episode_r}, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	history = model.fit([episode_state, episode_action_state, advantage, episode_pred], {'o_P': episode_action, 'o_V': episode_r}, callbacks = callbacks_list, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
 	episode_r = np.empty((0, 1), dtype=np.float32)
 	episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)

@@ -113,7 +113,7 @@ def preprocess(image, look_action):
 
 	return images
 
-model = load_model("saved_models/model_updates780", compile=False)
+model = load_model("saved_models/model_updates2460", compile=False)
 game_state = game.GameState(30)
 
 currentScore = 0
