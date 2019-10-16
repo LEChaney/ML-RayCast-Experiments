@@ -177,7 +177,7 @@ def preprocess(image, look_action=np.array((0, 0))):
 
 # initialize a new model using buildmodel() or use load_model to resume training an already trained model
 model = buildmodel()
-#model = load_model("saved_models/model_updates3900", custom_objects={'logloss': logloss, 'sumofsquares': sumofsquares})
+# model.load_weights("saved_models/model_updates10080")
 model._make_predict_function()
 graph = tf.get_default_graph()
 
@@ -188,11 +188,13 @@ a_t[0] = 1 #index 0 = no flap, 1= flap
 #output of network represents probability of flap
 
 game_state = []
+look_targets = []
 for i in range(0,THREADS):
 	game_state.append(game.GameState(30000))
+	look_targets.append(np.array((0., 0.)))
 
 
-def runprocess(thread_id, s_t, action_state, current_look_target):
+def runprocess(thread_id, s_t, action_state):
 	global T
 	global a_t
 	global model
@@ -203,12 +205,12 @@ def runprocess(thread_id, s_t, action_state, current_look_target):
 	r_t = 0
 	r_store = np.empty((0, 1), dtype=np.float32)
 	state_store = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
-	action_state_store = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
 	action_store = np.empty((0, NUM_ACTIONS), dtype=np.float32)
+	action_state_store = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
 	pred_store = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 	critic_store = np.empty((0, 1), dtype=np.float32)
 	s_t = s_t.reshape(1, s_t.shape[0], s_t.shape[1], s_t.shape[2])
-	action_state = action_state.reshape(1, action_state.shape[0])
+	action_state = action_state.reshape((1, -1))
 
 	while t-t_start < T_MAX and terminal == False:
 		t += 1
@@ -232,15 +234,15 @@ def runprocess(thread_id, s_t, action_state, current_look_target):
 
 		if len(look_action) == 0:
 			look_action = np.array((0, 0))
-		current_look_target += look_action
+		look_targets[thread_id] += look_action
 
 		# Invalid action penalty
 		valid = (-1 <= actions) & (actions <= 1)
-		valid = np.append(valid, (-1 <= current_look_target) & (current_look_target <=1))
+		valid = np.append(valid, (-1 <= look_targets[thread_id]) & (look_targets[thread_id] <=1))
 		invalid = ~valid
-		r_t += np.sum(invalid * np.abs(np.append(actions, current_look_target))) * -0.1
+		r_t += np.sum(invalid * np.abs(np.append(actions, look_targets[thread_id]))) * -0.1
 
-		current_look_target = np.clip(current_look_target, -1., 1.)
+		look_targets[thread_id] = np.clip(look_targets[thread_id], -1., 1.)
 
 		# Visualize crops
 		# TODO: Tidy
@@ -255,7 +257,7 @@ def runprocess(thread_id, s_t, action_state, current_look_target):
 			range_y = max_y - min_y
 			range_x = max_x - min_x
 
-			y_norm, x_norm = (current_look_target + 1) / 2
+			y_norm, x_norm = (look_targets[thread_id] + 1) / 2
 			y = min_y + y_norm * range_y
 			x = min_x + x_norm * range_x
 			y = int(np.clip(y, min_y, max_y))
@@ -263,7 +265,7 @@ def runprocess(thread_id, s_t, action_state, current_look_target):
 			pygame.draw.rect(pygame.display.get_surface(), Color(255, 255, 255), Rect(y-crop_height//2, x-crop_width//2, crop_height, crop_width), 5)
 		pygame.display.update()
 
-		x_t = preprocess(x_t, current_look_target)
+		x_t = preprocess(x_t, look_targets[thread_id])
 
 
 		with graph.as_default():
@@ -292,11 +294,13 @@ def runprocess(thread_id, s_t, action_state, current_look_target):
 	else:
 		r_store[len(r_store)-1] = [-1] * 1
 		s_t = np.concatenate((x_t, x_t, x_t, x_t), axis=3)
+		action_state = np.zeros((1, NUM_ACTIONS * TIME_SLICES))
+		look_targets[thread_id] = np.array((0., 0.))
 	
 	for i in range(2,len(r_store)+1):
 		r_store[len(r_store)-i] = r_store[len(r_store)-i] + GAMMA*r_store[len(r_store)-i + 1]
 
-	return s_t, action_state, current_look_target, state_store, action_state_store, action_store, pred_store, r_store, critic_store
+	return s_t, action_state, state_store, action_state_store, action_store, pred_store, r_store, critic_store
 
 #function to decrease the learning rate after every epoch. In this manner, the learning rate reaches 0, by 20,000 epochs
 def step_decay(epoch):
@@ -311,7 +315,6 @@ class actorthread(threading.Thread):
 		self.thread_id = thread_id
 		self.next_state = s_t
 		self.next_action_state = action_state
-		self.next_look_target = np.array((0., 0.))
 
 	def run(self):
 		global episode_action
@@ -322,9 +325,8 @@ class actorthread(threading.Thread):
 		global episode_action_state
 
 		threadLock.acquire()
-		self.next_state, self.next_action_state, self.next_look_target, state_store, action_state_store, action_store, pred_store, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_action_state, self.next_look_target)
+		self.next_state, self.next_action_state, state_store, action_state_store, action_store, pred_store, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_action_state)
 		self.next_state = self.next_state.reshape(self.next_state.shape[1], self.next_state.shape[2], self.next_state.shape[3])
-		self.next_action_state = self.next_action_state.reshape(self.next_action_state.shape[1])
 
 		episode_r = np.append(episode_r, r_store, axis = 0)
 		episode_pred = np.append(episode_pred, pred_store, axis = 0)
@@ -346,7 +348,7 @@ for i in range(0, len(game_state)):
 	state = np.concatenate((image, image, image, image), axis=3)
 	states = np.append(states, state, axis = 0)
 	action = action.reshape((1, -1))
-	action_state = np.concatenate((action, action, action, action), axis=-1)
+	action_state = np.concatenate([action] * TIME_SLICES, axis=-1)
 	action_states = np.append(action_states, action_state, axis=0)
 
 while True:	
@@ -375,8 +377,8 @@ while True:
 		# plt.imshow(state[:, :, IMAGE_CHANNELS-NUM_CROPS+2])
 		# plt.show()
 		state = state.reshape(1, state.shape[0], state.shape[1], state.shape[2])
-		action_state = action_state.reshape(1, action_state.shape[0])
 		states = np.append(states, state, axis = 0)
+		action_state.reshape(1, -1)
 		action_states = np.append(action_states, action_state, axis = 0)
 
 	e_mean = np.mean(episode_r)
@@ -385,11 +387,11 @@ while True:
 	# advantage = np.reshape(advantage, (-1, 1))
 	print("backpropagating")
 
-	lrate = LearningRateScheduler(step_decay)
-	callbacks_list = [lrate]
+	# lrate = LearningRateScheduler(step_decay)
+	# callbacks_list = [lrate]
 
 	#backpropagation
-	history = model.fit([episode_state, episode_action_state, advantage, episode_pred], {'o_P': episode_action, 'o_V': episode_r}, callbacks = callbacks_list, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	history = model.fit([episode_state, episode_action_state, advantage, episode_pred], {'o_P': episode_action, 'o_V': episode_r}, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
 	episode_r = np.empty((0, 1), dtype=np.float32)
 	episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
