@@ -20,6 +20,7 @@ from keras.layers import Lambda
 from keras.backend import slice
 
 import pygame
+from pygame import Rect, Color
 import wrapped_flappy_bird as game
 
 import scipy.misc
@@ -33,8 +34,8 @@ import matplotlib.pyplot as plt
 
 GAMMA = 0.99                #discount value
 BETA = 0.01                 #regularisation coefficient
-IMAGE_ROWS = 44
-IMAGE_COLS = 44
+IMAGE_ROWS = 42
+IMAGE_COLS = 42
 ZOOM = 2
 NUM_CROPS = 3
 TIME_SLICES = 4
@@ -44,6 +45,7 @@ NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = TIME_SLICES * NUM_CROPS
 LEARNING_RATE = 1e-4
 LOSS_CLIPPING = 0.2
+LOOK_SPEED = 0.1
 
 EPOCHS = 3
 THREADS = 16
@@ -58,6 +60,7 @@ episode_action_state = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
 episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
 episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 episode_critic = np.empty((0, 1), dtype=np.float32)
+
 
 DUMMY_ADVANTAGE = np.zeros((1, 1))
 DUMMY_OLD_PRED  = np.zeros((1, NUM_ACTIONS * 2))
@@ -189,7 +192,7 @@ for i in range(0,THREADS):
 	game_state.append(game.GameState(30000))
 
 
-def runprocess(thread_id, s_t, action_state):
+def runprocess(thread_id, s_t, action_state, current_look_target):
 	global T
 	global a_t
 	global model
@@ -219,19 +222,49 @@ def runprocess(thread_id, s_t, action_state):
 		sigma_sq = out[num_actions:]
 		eps = np.random.randn(mu.shape[0])
 		actions = mu + np.sqrt(sigma_sq) * eps
-		look_action = actions[1:]
+		look_action = actions[1:] * LOOK_SPEED
 
 		# no = np.random.rand()
 		# a_t = [0,1] if no < actions[0] else [1,0]  #stochastic action
 		a_t = [0,1] if 0.5 < actions[0] else [1,0]  #deterministic action
 
 		x_t, r_t, terminal = game_state[thread_id].frame_step(a_t)
-		x_t = preprocess(x_t, look_action)
+
+		if len(look_action) == 0:
+			look_action = np.array((0, 0))
+		current_look_target += look_action
 
 		# Invalid action penalty
 		valid = (-1 <= actions) & (actions <= 1)
+		valid = np.append(valid, (-1 <= current_look_target) & (current_look_target <=1))
 		invalid = ~valid
-		r_t += np.sum(invalid * np.abs(actions)) * -0.1
+		r_t += np.sum(invalid * np.abs(np.append(actions, current_look_target))) * -0.1
+
+		current_look_target = np.clip(current_look_target, -1., 1.)
+
+		# Visualize crops
+		# TODO: Tidy
+		for i in range(NUM_CROPS):
+			max_dim = max(x_t.shape[0], x_t.shape[1])
+			crop_height = min(int(max_dim // (ZOOM**i)), x_t.shape[0])
+			crop_width = min(int(max_dim // (ZOOM**i)), x_t.shape[1])
+			min_y = crop_height // 2
+			min_x = crop_width // 2
+			max_y = max(x_t.shape[0] - crop_height//2, min_y)
+			max_x = max(x_t.shape[1] - crop_width//2, min_x)
+			range_y = max_y - min_y
+			range_x = max_x - min_x
+
+			y_norm, x_norm = (current_look_target + 1) / 2
+			y = min_y + y_norm * range_y
+			x = min_x + x_norm * range_x
+			y = int(np.clip(y, min_y, max_y))
+			x = int(np.clip(x, min_x, max_x))
+			pygame.draw.rect(pygame.display.get_surface(), Color(255, 255, 255), Rect(y-crop_height//2, x-crop_width//2, crop_height, crop_width), 5)
+		pygame.display.update()
+
+		x_t = preprocess(x_t, current_look_target)
+
 
 		with graph.as_default():
 			critic_reward = model.predict([s_t, action_state, DUMMY_ADVANTAGE, DUMMY_OLD_PRED])[1]
@@ -263,7 +296,7 @@ def runprocess(thread_id, s_t, action_state):
 	for i in range(2,len(r_store)+1):
 		r_store[len(r_store)-i] = r_store[len(r_store)-i] + GAMMA*r_store[len(r_store)-i + 1]
 
-	return s_t, action_state, state_store, action_state_store, action_store, pred_store, r_store, critic_store
+	return s_t, action_state, current_look_target, state_store, action_state_store, action_store, pred_store, r_store, critic_store
 
 #function to decrease the learning rate after every epoch. In this manner, the learning rate reaches 0, by 20,000 epochs
 def step_decay(epoch):
@@ -278,6 +311,7 @@ class actorthread(threading.Thread):
 		self.thread_id = thread_id
 		self.next_state = s_t
 		self.next_action_state = action_state
+		self.next_look_target = np.array((0., 0.))
 
 	def run(self):
 		global episode_action
@@ -288,7 +322,7 @@ class actorthread(threading.Thread):
 		global episode_action_state
 
 		threadLock.acquire()
-		self.next_state, self.next_action_state, state_store, action_state_store, action_store, pred_store, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_action_state)
+		self.next_state, self.next_action_state, self.next_look_target, state_store, action_state_store, action_store, pred_store, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_action_state, self.next_look_target)
 		self.next_state = self.next_state.reshape(self.next_state.shape[1], self.next_state.shape[2], self.next_state.shape[3])
 		self.next_action_state = self.next_action_state.reshape(self.next_action_state.shape[1])
 

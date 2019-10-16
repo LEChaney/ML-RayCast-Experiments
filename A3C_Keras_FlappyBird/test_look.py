@@ -23,12 +23,13 @@ TIME_SLICES = 4
 EXTRA_ACTIONS = 2
 NUM_CROPS = 3
 IMAGE_CHANNELS = 4 * NUM_CROPS
-IMAGE_ROWS = 44
-IMAGE_COLS = 44
+IMAGE_ROWS = 42
+IMAGE_COLS = 42
 NUM_ACTIONS = EXTRA_ACTIONS + 1
 BETA = 0.01
 LOSS_CLIPPING = 0.2
 ZOOM = 2
+LOOK_SPEED = 0.1
 
 DUMMY_ADVANTAGE = K.zeros((1, NUM_ACTIONS))
 DUMMY_OLD_PRED  = K.zeros((1, NUM_ACTIONS * 2))
@@ -112,13 +113,12 @@ def preprocess(image, look_action):
 
 	return images
 
-model = load_model("saved_models/model_updates1140", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
+model = load_model("saved_models/model_updates1800", custom_objects={'loss': ppo_loss(DUMMY_ADVANTAGE, DUMMY_OLD_PRED)})
 game_state = game.GameState(30)
 
 currentScore = 0
 topScore = 0
 a_t = [1,0]
-actions = np.array([0] * NUM_ACTIONS)
 FIRST_FRAME = True
 
 terminal = False
@@ -126,13 +126,22 @@ r_t = 0
 while True:
 	if FIRST_FRAME:
 		x_t = game_state.getCurrentFrame()
-		x_t = preprocess(x_t, actions[1:])
+		actions = np.array([0] * NUM_ACTIONS)
+		current_look_target = np.array((0., 0.))
+		x_t = preprocess(x_t, current_look_target)
 		s_t = np.concatenate((x_t, x_t, x_t, x_t), axis=3)
 		actions = actions.reshape((1, -1))
 		action_state = np.concatenate((actions, actions, actions, actions), axis=-1)
 		FIRST_FRAME = False		
 	else:
 		x_t, r_t, terminal = game_state.frame_step(a_t)
+
+		look_action = actions[1:] * LOOK_SPEED
+		if len(look_action) == 0:
+			look_action = np.array((0, 0))
+		current_look_target += look_action
+
+		current_look_target = np.clip(current_look_target, -1., 1.)
 
 		# Visualize crops
 		# TODO: Tidy
@@ -147,12 +156,7 @@ while True:
 			range_y = max_y - min_y
 			range_x = max_x - min_x
 
-			look_action = actions[1:]
-
-			if len(look_action) == 0:
-				look_action = np.array((0, 0))
-
-			y_norm, x_norm = (look_action + 1) / 2
+			y_norm, x_norm = (current_look_target + 1) / 2
 			y = min_y + y_norm * range_y
 			x = min_x + x_norm * range_x
 			y = int(np.clip(y, min_y, max_y))
@@ -160,7 +164,7 @@ while True:
 			pygame.draw.rect(pygame.display.get_surface(), Color(255, 255, 255), Rect(y-crop_height//2, x-crop_width//2, crop_height, crop_width), 5)
 		pygame.display.update()
 
-		x_t = preprocess(x_t, actions[1:])
+		x_t = preprocess(x_t, current_look_target)
 
 		# plt.imshow(x_t[0, :, :, 0])
 		# plt.show()
