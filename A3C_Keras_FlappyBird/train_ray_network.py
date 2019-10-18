@@ -44,8 +44,8 @@ TIME_SLICES = 4
 EXTRA_ACTIONS = 0
 NUM_NORMAL_ACTIONS = 1
 NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
-IMAGE_CHANNELS = TIME_SLICES * NUM_CROPS
-LEARNING_RATE_RAY = 1e-4
+IMAGE_CHANNELS = NUM_CROPS # * TIME_SLICES
+LEARNING_RATE_RAY = 5e-5
 LEARNING_RATE_ACTION = 1e-4
 LOSS_CLIPPING = 0.2
 NUM_RAYS = 5
@@ -146,14 +146,13 @@ def build_ray_model():
 	P_mu = Dense(NUM_RAYS * 3, activation = 'tanh', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
 	P_sigma = Dense(NUM_RAYS * 3, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
-	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
 	
 	A = Input(shape = (1,), name = 'Advantage')
 	O = Input(shape = (NUM_RAYS * 3 * 2,), name = 'Old_Prediction')
-	model = Model(inputs = [S,RS,A,O], outputs = [P,V])
+	model = Model(inputs = [S,RS,A,O], outputs = P)
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
 	optimizer = Adam(lr = LEARNING_RATE_RAY)
-	model.compile(loss = {'o_P': ppo_loss(A,O, NUM_RAYS * 3, BETA), 'o_V': 'mse'}, loss_weights = {'o_P': 1., 'o_V' : 1}, optimizer = optimizer)
+	model.compile(loss = ppo_loss(A,O, NUM_RAYS * 3, BETA), optimizer = optimizer)
 	return model
 
 def build_action_model():
@@ -173,15 +172,45 @@ def build_action_model():
 	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
 	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
-	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
 	
 	A = Input(shape = (1,), name = 'Advantage')
 	O = Input(shape = (NUM_ACTIONS * 2,), name = 'Old_Prediction')
-	model = Model(inputs = [S,RS,A,O], outputs = [P,V])
+	model = Model(inputs = [S,RS,A,O], outputs = P)
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
 	optimizer = Adam(lr = LEARNING_RATE_ACTION)
-	model.compile(loss = {'o_P': ppo_loss(A,O, NUM_ACTIONS, BETA), 'o_V': 'mse'}, loss_weights = {'o_P': 1., 'o_V' : 1}, optimizer = optimizer)
+	model.compile(loss = ppo_loss(A,O, NUM_ACTIONS, BETA), optimizer = optimizer)
 	return model
+
+def build_critic_model():
+	print("Model building begins")
+
+	model = Sequential()
+	keras.initializers.RandomUniform(minval=-0.1, maxval=0.1, seed=None)
+
+	SI = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
+	SD = Input(shape = (NUM_RAYS * TIME_SLICES, ), name = 'Input_Ray_Hit_Distances')
+	RS = Input(shape = (NUM_RAYS * 4,), name = 'Input_Ray_State')
+
+	h0 = CoordinateChannel2D()(SI)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h0)
+	h0 = BatchNormalization()(h0)
+	h1 = CoordinateChannel2D()(h0)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h1)
+	h1 = BatchNormalization()(h1)
+	h2 = Flatten()(h1)
+	h2 = Concatenate()([RS, SD, h2])
+
+	h3 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
+	h3 = BatchNormalization()(h3)
+
+	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
+	
+	model = Model(inputs = [SI,SD,RS], outputs = V)
+	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
+	optimizer = Adam(lr = LEARNING_RATE_ACTION)
+	model.compile(loss = 'mse', optimizer = optimizer)
+	return model
+
 
 #function to preprocess an image before giving as input to the neural network
 def preprocess(image, look_action=np.array((0, 0))):
@@ -221,6 +250,7 @@ def preprocess(image, look_action=np.array((0, 0))):
 # initialize a new model using buildmodel() or use load_model to resume training an already trained model
 ray_model = build_ray_model()
 action_model = build_action_model()
+critic_model = build_critic_model()
 # model.load_weights("saved_models/model_updates10080")
 ray_model._make_predict_function()
 action_model._make_predict_function()
@@ -233,7 +263,9 @@ game_state = []
 ray_states = []
 for i in range(0,THREADS):
 	game_state.append(game.GameState(30000))
-	ray_states.append({'starts': np.array([[game_state[i].playerx, game_state[i].playery]] * NUM_RAYS, dtype=np.float32), 'angles': np.array([0.] * NUM_RAYS)})
+	starts = np.array([[game_state[i].playerx, game_state[i].playery]] * NUM_RAYS, dtype=np.float32)
+	angles = np.arange(NUM_RAYS) * np.pi / (NUM_RAYS - 1) - np.pi / 2
+	ray_states.append({'starts': starts, 'angles': angles})
 
 def random_color():
     return list(np.random.choice(range(256), size=3))
@@ -279,7 +311,7 @@ def runprocess(thread_id, s_t, s_d_t):
 		ray_state_angles = np.concatenate([np.cos(ray_states[thread_id]['angles']).reshape(-1, 1), np.sin(ray_states[thread_id]['angles']).reshape(-1, 1)], axis=-1)
 		ray_state = np.concatenate([ray_state_starts, ray_state_angles], axis=-1).reshape(1, -1)
 		with graph.as_default():
-			ray_net_out = ray_model.predict([s_t, ray_state, DUMMY_ADVANTAGE, DUMMY_OLD_RAY_PRED])[0][0]
+			ray_net_out = ray_model.predict([s_t, ray_state, DUMMY_ADVANTAGE, DUMMY_OLD_RAY_PRED])[0]
 		num_actions = ray_net_out.shape[0] // 2
 		mu = ray_net_out[:num_actions]
 		sigma_sq = ray_net_out[num_actions:]
@@ -289,8 +321,8 @@ def runprocess(thread_id, s_t, s_d_t):
 		ray_starts_v = RAY_START_VEL * ray_starts_v
 		ray_angles_v = ray_actions[NUM_RAYS * 2:]
 		ray_angles_v = RAY_ANGLE_VEL * ray_angles_v
-		# ray_states[thread_id]['starts'] += ray_starts_v
-		ray_states[thread_id]['starts'] = np.array([[game_state[thread_id].playerx + 35, game_state[thread_id].playery + 5]] * NUM_RAYS)
+		ray_states[thread_id]['starts'] += ray_starts_v
+		# ray_states[thread_id]['starts'] = np.array([[game_state[thread_id].playerx + 35, game_state[thread_id].playery + 5]] * NUM_RAYS)
 		unclipped_ray_starts = ray_states[thread_id]['starts'] # Unbounded
 		ray_states[thread_id]['starts'] = np.clip(ray_states[thread_id]['starts'], 0, current_frame.shape[0:2]) # Clipped to range [0, frame_size]
 		ray_states[thread_id]['angles'] += ray_angles_v
@@ -320,7 +352,7 @@ def runprocess(thread_id, s_t, s_d_t):
 
 		# Get action prediction using raycasts as input
 		with graph.as_default():
-			action_net_out = action_model.predict([s_d_t, ray_state, DUMMY_ADVANTAGE, DUMMY_OLD_PRED])[0][0]
+			action_net_out = action_model.predict([s_d_t, ray_state, DUMMY_ADVANTAGE, DUMMY_OLD_PRED])[0]
 		num_actions = action_net_out.shape[0] // 2
 		mu = action_net_out[:num_actions]
 		sigma_sq = action_net_out[num_actions:]
@@ -348,8 +380,8 @@ def runprocess(thread_id, s_t, s_d_t):
 		x_t = preprocess(x_t)
 
 		with graph.as_default():
-			ray_critic_reward = ray_model.predict([s_t, ray_state, DUMMY_ADVANTAGE, DUMMY_OLD_RAY_PRED])[1]
-			action_critic_reward = action_model.predict([s_d_t, ray_state, DUMMY_ADVANTAGE, DUMMY_OLD_PRED])[1]
+			ray_critic_reward = critic_model.predict([s_t, s_d_t, ray_state])
+			action_critic_reward = ray_critic_reward
 
 		# y = 0 if a_t[0] == 1 else 1
 		# y = np.hstack((y, look_action))
@@ -376,7 +408,7 @@ def runprocess(thread_id, s_t, s_d_t):
 		
 		s_t = np.append(x_t, s_t[:, :, :, :-NUM_CROPS], axis=3)
 		# action_state = np.append(action_and_look, action_state[:, :-NUM_ACTIONS], axis=-1)
-		print("Frame = " + str(T) + ", Updates = " + str(EPISODE) + ", Thread = " + str(thread_id) + ", Action = " + str(a_t) + ", " + str(actions) + ", Output = "+ str(action_net_out))
+		print("Frame = " + str(T) + ", Updates = " + str(EPISODE) + ", Thread = " + str(thread_id) + ", Action = " + str(a_t) + ", " + str(actions) + ", Output = "+ str(np.concatenate((action_net_out, ray_net_out), axis=-1)))
 	
 	if terminal == False:
 		r_store_ray[len(r_store_ray)-1] = critic_store_ray[len(r_store_ray)-1]
@@ -384,9 +416,11 @@ def runprocess(thread_id, s_t, s_d_t):
 	else:
 		r_store_ray[len(r_store_ray)-1] = [-1] * 1
 		r_store_action[len(r_store_action)-1] = [-1] * 1
-		s_t = np.concatenate([x_t] * TIME_SLICES, axis=3)
+		s_t = np.concatenate([x_t] * 1, axis=3)
 		s_d_t = np.zeros((0, NUM_RAYS * TIME_SLICES))
-		ray_states[thread_id] = {'starts': np.array([[game_state[thread_id].playerx, game_state[thread_id].playery]] * NUM_RAYS, dtype=np.float32), 'angles': np.array([0.] * NUM_RAYS)}
+		starts = np.array([[game_state[thread_id].playerx, game_state[thread_id].playery]] * NUM_RAYS, dtype=np.float32)
+		angles = np.arange(NUM_RAYS) * np.pi / (NUM_RAYS - 1) - np.pi / 2
+		ray_states[thread_id] = {'starts': starts, 'angles': angles}
 		# action_state = np.zeros((1, NUM_ACTIONS * TIME_SLICES))
 		# look_targets[thread_id] = np.array((0., 0.))
 	
@@ -453,7 +487,7 @@ states_d = []
 for i in range(0, len(game_state)):
 	image = game_state[i].getCurrentFrame()
 	image = preprocess(image)
-	state = np.concatenate(([image] * TIME_SLICES), axis=3)
+	state = np.concatenate(([image] * 1), axis=3)
 	states = np.append(states, state, axis = 0)
 
 while True:	
@@ -493,6 +527,7 @@ while True:
 	#advantage calculation for each action taken
 	advantage_ray = episode_r_ray - episode_critic_ray
 	advantage_action = episode_r_action - episode_critic_action
+	advantage = (advantage_ray + advantage_action) / 2
 	# advantage = np.reshape(advantage, (-1, 1))
 	print("backpropagating")
 
@@ -502,8 +537,9 @@ while True:
 	callbacks_list_action = [lrate_action]
 
 	#backpropagation
-	history_ray = ray_model.fit([episode_state_ray_img, episode_state_ray, advantage_ray, episode_pred_ray], {'o_P': episode_action_ray, 'o_V': episode_r_ray}, callbacks = callbacks_list_ray, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
-	history_action = action_model.fit([episode_state_action, episode_state_ray, advantage_action, episode_pred_action], {'o_P': episode_action, 'o_V': episode_r_action}, callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	history_ray = ray_model.fit([episode_state_ray_img, episode_state_ray, advantage, episode_pred_ray], [episode_action_ray], callbacks = callbacks_list_ray, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	history_action = action_model.fit([episode_state_action, episode_state_ray, advantage, episode_pred_action], [episode_action], callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	history_critic = critic_model.fit([episode_state_ray_img, episode_state_action, episode_state_ray], [episode_r_ray], callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
 	episode_r_ray = np.empty((0, 1), dtype=np.float32)
 	episode_r_action = np.empty((0, 1), dtype=np.float32)
