@@ -153,7 +153,7 @@ class GameState:
                     (self.playerx, self.playery))
 
         image_data = pygame.surfarray.array3d(pygame.display.get_surface())
-        pygame.display.update()
+        # pygame.display.update()
 
         FPSCLOCK.tick(self.FPS)	    
         return image_data, reward, terminal
