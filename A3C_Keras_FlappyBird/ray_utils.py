@@ -65,6 +65,9 @@ def raycast(img, starts, angles):
     
     # assert starts.shape[0] == angles.shape[0], "Error, number of start locations and number of angles must be the same"
 
+    if starts.size < angles.size:
+        starts = np.tile(starts.reshape(1, -1), [angles.size, 1])
+
     hit_locations = []
     distances = []
     for start, angle in zip(starts, angles):
