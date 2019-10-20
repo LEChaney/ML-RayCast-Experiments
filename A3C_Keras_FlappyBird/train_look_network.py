@@ -45,9 +45,9 @@ NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = TIME_SLICES * NUM_CROPS
 LEARNING_RATE = 1e-4
 LOSS_CLIPPING = 0.2
-LOOK_SPEED = 0.00
-TEMPERATURE = 0
-TEMP_INCR = 1e-6
+LOOK_SPEED = 0.1
+# TEMPERATURE = 0
+# TEMP_INCR = 1e-6
 
 EPOCHS = 3
 THREADS = 16
@@ -105,7 +105,12 @@ def ppo_loss(advantage, old_pred):
 		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
 		entropy_penalty = -BETA * K.mean(entropy)
 
-		return aloss + entropy_penalty
+		shape = [K.shape(y_pred)[0], NUM_ACTIONS]
+		eps = K.random_normal(shape)
+		actions = mu_pred + K.sqrt(var_pred) * eps
+		energy_penalty = 0.5 * K.mean(K.square(actions))
+
+		return aloss + entropy_penalty + energy_penalty
 	return loss
 
 #loss function for critic output
@@ -218,8 +223,8 @@ def runprocess(thread_id, s_t, action_state):
 	while t-t_start < T_MAX and terminal == False:
 		t += 1
 		T += 1
-		LOOK_SPEED += TEMP_INCR
-		LOOK_SPEED = np.clip(LOOK_SPEED, 0, 0.1)
+		# LOOK_SPEED += TEMP_INCR
+		# LOOK_SPEED = np.clip(LOOK_SPEED, 0, 0.1)
 
 		with graph.as_default():
 			out = model.predict([s_t, action_state, DUMMY_ADVANTAGE, DUMMY_OLD_PRED])[0][0]
@@ -412,6 +417,7 @@ while True:
 	f = open("rewards.txt","a")
 	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]) + "\n")
 	f.close()
+	print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]))
 
 	if EPISODE % (20 * EPOCHS) == 0: 
 		model.save("saved_models/model_updates" +	str(EPISODE)) 

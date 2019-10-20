@@ -112,9 +112,14 @@ def ppo_loss(advantage, old_pred, num_actions, beta):
 		aloss = -K.mean(K.minimum(surr1, surr2))
 
 		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
-		entropy_penalty = -beta * K.mean(entropy)
+		entropy_bonus = -beta * K.mean(entropy)
 
-		return aloss + entropy_penalty
+		shape = [K.shape(y_pred)[0], num_actions]
+		eps = K.random_normal(shape)
+		actions = mu_pred + K.sqrt(var_pred) * eps
+		energy_penalty = 0.5 * K.mean(K.square(actions))
+
+		return aloss + entropy_bonus + energy_penalty
 	return loss
 
 #loss function for critic output
