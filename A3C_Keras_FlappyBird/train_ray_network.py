@@ -47,7 +47,7 @@ NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = NUM_CROPS * TIME_SLICES
 LEARNING_RATE_RAY = 1e-4
 LEARNING_RATE_ACTION = 1e-4
-LOSS_CLIPPING = 0.1
+LOSS_CLIPPING = 0.2
 NUM_RAYS = 5
 NUM_RAY_ACTIONS = NUM_RAYS + 2
 RAY_START_VEL = 10
@@ -114,12 +114,12 @@ def ppo_loss(advantage, old_pred, num_actions, beta):
 		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
 		entropy_bonus = -beta * K.mean(entropy)
 
-		shape = [K.shape(y_pred)[0], num_actions]
-		eps = K.random_normal(shape)
-		actions = mu_pred + K.sqrt(var_pred) * eps
-		energy_penalty = 0.5 * K.mean(K.square(actions))
+		# shape = [K.shape(y_pred)[0], num_actions]
+		# eps = K.random_normal(shape)
+		# actions = mu_pred + K.sqrt(var_pred) * eps
+		# energy_penalty = 0.01 * K.mean(K.square(actions))
 
-		return aloss + entropy_bonus + energy_penalty
+		return aloss + entropy_bonus# + energy_penalty
 	return loss
 
 #loss function for critic output
@@ -136,18 +136,18 @@ def build_ray_model():
 	S = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
 	SR = Input(shape = ((NUM_RAYS * 3 + 2) * TIME_SLICES, ), name = 'Input_Ray_State')
 	h0 = CoordinateChannel2D()(S)
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h0)
-	h0 = BatchNormalization()(h0)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform')(h0)
 	h1 = CoordinateChannel2D()(h0)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h1)
-	h1 = BatchNormalization()(h1)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform')(h1)
 	h2 = Flatten()(h1)
-	h2 = Concatenate()([SR, h2])
+
+	a = Dense(128, kernel_initializer = 'he_uniform')(h2)
+	b = Dense(128, kernel_initializer = 'he_uniform')(SR)
+	h2 = Concatenate()([a, b])
 	
-	h3 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
-	h3 = BatchNormalization()(h3)
-	P_mu = Dense(NUM_RAY_ACTIONS, activation = 'tanh', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
-	P_sigma = Dense(NUM_RAY_ACTIONS, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
+	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h2)
+	P_mu = Dense(NUM_RAY_ACTIONS, activation = 'tanh') (h3)
+	P_sigma = Dense(NUM_RAY_ACTIONS, activation = 'softplus') (h3)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
 	
 	A = Input(shape = (1,), name = 'Advantage')
@@ -165,13 +165,11 @@ def build_action_model():
 	keras.initializers.RandomUniform(minval=-0.1, maxval=0.1, seed=None)
 
 	S = Input(shape = ((NUM_RAYS * 3 + 2) * TIME_SLICES, ), name = 'Input')
-	h1 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (S)
-	h1 = BatchNormalization()(h1)
-	h2 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h1)
-	h2 = BatchNormalization()(h2)
+	h1 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (S)
+	h2 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h1)
 
-	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
-	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
+	P_mu = Dense(NUM_ACTIONS, activation = 'tanh') (h2)
+	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus') (h2)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
 	
 	A = Input(shape = (1,), name = 'Advantage')
@@ -192,18 +190,18 @@ def build_critic_model():
 	SR = Input(shape = ((NUM_RAYS * 3 + 2) * TIME_SLICES, ), name = 'Input_Ray_State')
 
 	h0 = CoordinateChannel2D()(SI)
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h0)
-	h0 = BatchNormalization()(h0)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform')(h0)
 	h1 = CoordinateChannel2D()(h0)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h1)
-	h1 = BatchNormalization()(h1)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform')(h1)
 	h2 = Flatten()(h1)
-	h2 = Concatenate()([SR, h2])
 
-	h3 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
-	h3 = BatchNormalization()(h3)
+	a = Dense(128, kernel_initializer = 'he_uniform')(h2)
+	b = Dense(128, kernel_initializer = 'he_uniform')(SR)
+	h2 = Concatenate()([a, b])
 
-	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
+	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h2)
+
+	V = Dense(1, name = 'o_V') (h3)
 	
 	model = Model(inputs = [SI,SR], outputs = V)
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
@@ -308,6 +306,7 @@ def runprocess(thread_id, s_t, s_r_t):
 		# Perform raycast
 		hit_locs, distances = raycast(current_frame, ray_states[thread_id]['starts'], ray_states[thread_id]['angles'])
 		distances /= np.sqrt(np.square(current_frame.shape[0]) + np.square(current_frame.shape[1]))
+		distances = distances * 2 - 1
 		distances = np.reshape(distances, (1, -1))
 
 		# Visualize rays
@@ -410,6 +409,7 @@ def runprocess(thread_id, s_t, s_r_t):
 		current_frame = game_state[thread_id].getCurrentFrame()
 		_, distances = raycast(current_frame, starts, angles)
 		distances /= np.sqrt(np.square(current_frame.shape[0]) + np.square(current_frame.shape[1]))
+		distances = distances * 2 - 1
 		distances = np.reshape(distances, (1, -1))
 		ray_states[thread_id] = {'starts': starts, 'angles': angles}
 		ray_state_starts = (ray_states[thread_id]['starts'] / current_frame.shape[0:2] * 2) - 1
@@ -478,6 +478,7 @@ for i in range(0, len(game_state)):
 	image = game_state[i].getCurrentFrame()
 	_, distances = raycast(image, starts, angles)
 	distances /= np.sqrt(np.square(image.shape[0]) + np.square(image.shape[1]))
+	distances = distances * 2 - 1
 
 	ray_state_starts = (starts / image.shape[0:2] * 2) - 1
 	ray_state_angles = np.concatenate([np.cos(angles), np.sin(angles)], axis=-1)

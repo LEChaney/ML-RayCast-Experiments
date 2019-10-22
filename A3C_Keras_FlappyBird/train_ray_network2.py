@@ -109,12 +109,12 @@ def ppo_loss(advantage, old_pred, num_actions, beta):
 		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
 		entropy_bonus = -beta * K.mean(entropy)
 
-		shape = [K.shape(y_pred)[0], num_actions]
-		eps = K.random_normal(shape)
-		actions = mu_pred + K.sqrt(var_pred) * eps
-		energy_penalty = 0.1 * K.mean(K.square(actions))
+		# shape = [K.shape(y_pred)[0], num_actions]
+		# eps = K.random_normal(shape)
+		# actions = mu_pred + K.sqrt(var_pred) * eps
+		# energy_penalty = 0.1 * K.mean(K.square(actions))
 
-		return aloss + entropy_bonus + energy_penalty
+		return aloss + entropy_bonus# + energy_penalty
 	return loss
 
 #loss function for critic output
@@ -136,8 +136,8 @@ def build_ray_model():
 	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform')(h1)
 	h2 = Flatten()(h1)
 
-	a = Dense(128, activation = 'relu', kernel_initializer = 'he_uniform')(h2)
-	b = Dense(128, activation = 'relu', kernel_initializer = 'he_uniform')(SR)
+	a = Dense(128, kernel_initializer = 'he_uniform')(h2)
+	b = Dense(128, kernel_initializer = 'he_uniform')(SR)
 	h2 = Concatenate()([a, b])
 	
 	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h2)

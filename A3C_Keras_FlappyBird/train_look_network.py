@@ -34,8 +34,8 @@ import matplotlib.pyplot as plt
 
 GAMMA = 0.99                #discount value
 BETA = 0.01                 #regularisation coefficient
-IMAGE_ROWS = 42
-IMAGE_COLS = 42
+IMAGE_ROWS = 85
+IMAGE_COLS = 84
 ZOOM = 2
 NUM_CROPS = 3
 TIME_SLICES = 4
@@ -105,12 +105,12 @@ def ppo_loss(advantage, old_pred):
 		entropy = 0.5 * (K.log(2. * np.pi * var_pred + K.epsilon()) + 1.)
 		entropy_penalty = -BETA * K.mean(entropy)
 
-		shape = [K.shape(y_pred)[0], NUM_ACTIONS]
-		eps = K.random_normal(shape)
-		actions = mu_pred + K.sqrt(var_pred) * eps
-		energy_penalty = 0.5 * K.mean(K.square(actions))
+		# shape = [K.shape(y_pred)[0], NUM_ACTIONS]
+		# eps = K.random_normal(shape)
+		# actions = mu_pred + K.sqrt(var_pred) * eps
+		# energy_penalty = 0.1 * K.mean(K.square(actions))
 
-		return aloss + entropy_penalty + energy_penalty
+		return aloss + entropy_penalty# + energy_penalty
 	return loss
 
 #loss function for critic output
@@ -127,17 +127,20 @@ def buildmodel():
 	S = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
 	AS = Input(shape = (NUM_ACTIONS * TIME_SLICES,), name = 'Action_State')
 	h0 = CoordinateChannel2D()(S)
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h0)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform')(h0)
 	h1 = CoordinateChannel2D()(h0)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h1)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform')(h1)
 	h2 = Flatten()(h1)
-	h2 = Concatenate()([AS, h2])
+
+	a = Dense(128, kernel_initializer = 'he_uniform')(h2)
+	b = Dense(128, kernel_initializer = 'he_uniform')(AS)
+	h2 = Concatenate()([a, b])
 	
-	h3 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
-	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
-	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
+	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h2)
+	P_mu = Dense(NUM_ACTIONS, activation = 'tanh') (h3)
+	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus') (h3)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
-	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
+	V = Dense(1, name = 'o_V') (h3)
 	
 	A = Input(shape = (1,), name = 'Advantage')
 	O = Input(shape = (NUM_ACTIONS * 2,), name = 'Old_Prediction')
@@ -176,7 +179,7 @@ def preprocess(image, look_action=np.array((0, 0))):
 		img = crop(image, look_action, max_dim // (ZOOM**i), max_dim // (ZOOM**i))
 		img = skimage.transform.resize(img, (IMAGE_ROWS, IMAGE_COLS), mode = 'constant')
 		if img.min() != img.max(): # Prevent NaNs
-			img = skimage.exposure.rescale_intensity(img, out_range=(0,255))
+			img = skimage.exposure.rescale_intensity(img, out_range=(-1,1))
 		img = img.reshape(1, img.shape[0], img.shape[1])
 		images[:,:,:,i] = img
 
@@ -247,10 +250,10 @@ def runprocess(thread_id, s_t, action_state):
 		look_targets[thread_id] += look_action
 
 		# Invalid action penalty
-		valid = (-1 <= actions) & (actions <= 1)
-		valid = np.append(valid, (-1 <= look_targets[thread_id]) & (look_targets[thread_id] <=1))
-		invalid = ~valid
-		r_t += np.sum(invalid * np.abs(np.append(actions, look_targets[thread_id]))) * -0.1
+		# valid = (-1 <= actions) & (actions <= 1)
+		# valid = np.append(valid, (-1 <= look_targets[thread_id]) & (look_targets[thread_id] <=1))
+		# invalid = ~valid
+		# r_t += np.sum(invalid * np.abs(np.append(actions, look_targets[thread_id]))) * -0.1
 
 		look_targets[thread_id] = np.clip(look_targets[thread_id], -1., 1.)
 
