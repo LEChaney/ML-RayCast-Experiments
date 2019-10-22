@@ -324,13 +324,13 @@ def runprocess(thread_id, s_t, s_r_t):
 		sigma_sq = ray_net_out[num_actions:]
 		eps = np.random.randn(mu.shape[0])
 		ray_actions = mu + np.sqrt(sigma_sq) * eps
-		# ray_starts = (ray_actions[:2] + 1) / 2 * current_frame.shape[0:2]
+		ray_starts = (ray_actions[:2] + 1) / 2 * current_frame.shape[0:2]
 		# ray_angles = ray_actions[2:] * np.pi
-		ray_starts_v = ray_actions[0:2]
-		ray_starts_v = RAY_START_VEL * ray_starts_v
+		# ray_starts_v = ray_actions[0:2]
+		# ray_starts_v = RAY_START_VEL * ray_starts_v
 		ray_angles_v = ray_actions[2:]
 		ray_angles_v = RAY_ANGLE_VEL * ray_angles_v
-		ray_starts = ray_states[thread_id]['starts'] + ray_starts_v
+		# ray_starts = ray_states[thread_id]['starts'] + ray_starts_v
 		# ray_starts = np.array([[game_state[thread_id].playerx + 10, game_state[thread_id].playery + 10]] * NUM_RAYS)
 		unclipped_ray_starts = ray_starts # Unbounded
 		ray_starts = np.clip(ray_starts, 0, current_frame.shape[0:2]) # Clipped to range [0, frame_size]
