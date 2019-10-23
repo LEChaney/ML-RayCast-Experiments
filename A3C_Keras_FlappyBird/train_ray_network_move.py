@@ -14,6 +14,7 @@ from keras.layers import Dense, Flatten, Activation, Input, Concatenate
 from keras.layers import Conv2D, BatchNormalization
 from keras.optimizers import RMSprop, Adam
 import keras.backend as K
+from keras.backend.tensorflow_backend import set_session
 from keras.callbacks import LearningRateScheduler, History
 import tensorflow as tf
 
@@ -46,8 +47,8 @@ EXTRA_ACTIONS = 0
 NUM_NORMAL_ACTIONS = 1
 NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = NUM_CROPS * TIME_SLICES
-LEARNING_RATE_RAY = 1e-5
-LEARNING_RATE_ACTION = 1e-5
+LEARNING_RATE_RAY = 1e-4
+LEARNING_RATE_ACTION = 1e-4
 LOSS_CLIPPING = 0.2
 NUM_RAYS = 5
 NUM_RAY_ACTIONS = NUM_RAYS + 2
@@ -82,6 +83,11 @@ DUMMY_OLD_PRED  = np.zeros((1, NUM_ACTIONS * 2))
 
 ACTIONS = 2
 a_t = np.zeros(ACTIONS)
+
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+sess = tf.Session(config=config)
+set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 #loss function for policy output
 def logloss(advantage, num_actions, beta):     #policy loss
@@ -137,23 +143,22 @@ def build_ray_model():
 	print("Model building begins")
 
 	model = Sequential()
-	keras.initializers.RandomUniform(minval=-0.1, maxval=0.1, seed=None)
 
 	S = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
 	SR = Input(shape = ((NUM_RAYS * 3 + 2) * TIME_SLICES, ), name = 'Input_Ray_State')
 	h0 = CoordinateChannel2D()(S)
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform')(h0)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', bias_initializer = 'random_uniform')(h0)
 	h1 = CoordinateChannel2D()(h0)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform')(h1)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', bias_initializer = 'random_uniform')(h1)
 	h2 = Flatten()(h1)
 
-	a = Dense(128, kernel_initializer = 'he_uniform')(h2)
-	b = Dense(128, kernel_initializer = 'he_uniform')(SR)
+	a = Dense(128, bias_initializer = 'random_uniform')(h2)
+	b = Dense(128, bias_initializer = 'random_uniform')(SR)
 	h2 = Concatenate()([a, b])
 	
-	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h2)
-	P_mu = Dense(NUM_RAY_ACTIONS, activation = 'tanh') (h3)
-	P_sigma = Dense(NUM_RAY_ACTIONS, activation = 'softplus') (h3)
+	h3 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (h2)
+	P_mu = Dense(NUM_RAY_ACTIONS, activation = 'tanh', bias_initializer = 'random_uniform') (h3)
+	P_sigma = Dense(NUM_RAY_ACTIONS, activation = 'softplus', bias_initializer = 'random_uniform') (h3)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
 	
 	A = Input(shape = (1,), name = 'Advantage')
@@ -161,21 +166,20 @@ def build_ray_model():
 	model = Model(inputs = [S,SR,A,O], outputs = P)
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
 	optimizer = Adam(lr = LEARNING_RATE_RAY)
-	model.compile(loss = logloss(A, NUM_RAY_ACTIONS, BETA), optimizer = optimizer)
+	model.compile(loss = ppo_loss(A, O, NUM_RAY_ACTIONS, BETA), optimizer = optimizer)
 	return model
 
 def build_action_model():
 	print("Model building begins")
 
 	model = Sequential()
-	keras.initializers.RandomUniform(minval=-0.1, maxval=0.1, seed=None)
 
 	S = Input(shape = ((NUM_RAYS * 3 + 2) * TIME_SLICES, ), name = 'Input')
-	h1 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (S)
-	h2 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h1)
+	h1 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (S)
+	h2 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (h1)
 
-	P_mu = Dense(NUM_ACTIONS, activation = 'tanh') (h2)
-	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus') (h2)
+	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', bias_initializer = 'random_uniform') (h2)
+	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', bias_initializer = 'random_uniform') (h2)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
 	
 	A = Input(shape = (1,), name = 'Advantage')
@@ -183,7 +187,7 @@ def build_action_model():
 	model = Model(inputs = [S,A,O], outputs = P)
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
 	optimizer = Adam(lr = LEARNING_RATE_ACTION)
-	model.compile(loss = logloss(A, NUM_ACTIONS, BETA), optimizer = optimizer)
+	model.compile(loss = ppo_loss(A, O, NUM_ACTIONS, BETA), optimizer = optimizer)
 	return model
 
 def build_critic_model():
@@ -196,16 +200,16 @@ def build_critic_model():
 	SR = Input(shape = ((NUM_RAYS * 3 + 2) * TIME_SLICES, ), name = 'Input_Ray_State')
 
 	h0 = CoordinateChannel2D()(SI)
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'he_uniform')(h0)
+	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', bias_initializer = 'random_uniform')(h0)
 	h1 = CoordinateChannel2D()(h0)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'he_uniform')(h1)
+	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', bias_initializer = 'random_uniform')(h1)
 	h2 = Flatten()(h1)
 
-	a = Dense(128, kernel_initializer = 'he_uniform')(h2)
-	b = Dense(128, kernel_initializer = 'he_uniform')(SR)
+	a = Dense(128, bias_initializer = 'random_uniform')(h2)
+	b = Dense(128, bias_initializer = 'random_uniform')(SR)
 	h2 = Concatenate()([a, b])
 
-	h3 = Dense(256, activation = 'relu', kernel_initializer = 'he_uniform') (h2)
+	h3 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (h2)
 
 	V = Dense(1, name = 'o_V') (h3)
 	
@@ -572,7 +576,7 @@ while True:
 	summary_writer.add_summary(summary, EPISODE)
 
 	if EPISODE % (20 * EPOCHS) == 0: 
-		action_model.save("saved_models/action_model_updates" + str(EPISODE))
-		ray_model.save("saved_models/ray_model_updates" + str(EPISODE))
-		critic_model.save("saved_models/critic_model_update" + str(EPISODE))
+		action_model.save("saved_models/ray_move/action_model_updates" + str(EPISODE))
+		ray_model.save("saved_models/ray_move/ray_model_updates" + str(EPISODE))
+		critic_model.save("saved_models/ray_move/critic_model_update" + str(EPISODE))
 	EPISODE += EPOCHS
