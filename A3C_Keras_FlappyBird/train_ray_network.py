@@ -1,5 +1,6 @@
 import numpy as np
 import sys
+from datetime import datetime
 sys.path.append("game/")
 
 from coord import CoordinateChannel2D
@@ -71,6 +72,9 @@ episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
 episode_pred_ray = np.empty((0, NUM_RAY_ACTIONS * 2), dtype=np.float32)
 episode_pred_action = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 episode_critic = np.empty((0, 1), dtype=np.float32)
+
+now = datetime.now().strftime("%Y%m%d-%H%M%S")
+summary_writer = tf.summary.FileWriter("logs/ray/" + now, tf.get_default_graph())
 
 DUMMY_ADVANTAGE = np.zeros((1, 1))
 DUMMY_OLD_RAY_PRED = np.zeros((1, NUM_RAY_ACTIONS * 2))
@@ -531,11 +535,12 @@ while True:
 	lrate_action = LearningRateScheduler(create_decay_func(LEARNING_RATE_ACTION))
 	callbacks_list_ray = [lrate_ray]
 	callbacks_list_action = [lrate_action]
+	callbacks_list_critic = [lrate_action]
 
 	#backpropagation
 	history_ray = ray_model.fit([episode_state_ray, episode_state_action, advantage, episode_pred_ray], [episode_action_ray], callbacks = callbacks_list_ray, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 	history_action = action_model.fit([episode_state_action, advantage, episode_pred_action], [episode_action], callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
-	history_critic = critic_model.fit([episode_state_ray, episode_state_action], [episode_r], callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	history_critic = critic_model.fit([episode_state_ray, episode_state_action], [episode_r], callbacks = callbacks_list_critic, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
 	episode_r = np.empty((0, 1), dtype=np.float32)
 	episode_state_ray = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
@@ -550,6 +555,17 @@ while True:
 	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + str(history_ray.history['loss'][-1]) + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]) + "\n")
 	f.close()
 	print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + str(history_ray.history['loss'][-1]) + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]))
+	
+	e_mean_summary = tf.Summary(value=[
+		tf.Summary.Value(tag="reward mean", simple_value=float(e_mean))
+	])
+	summary_writer.add_summary(e_mean_summary, EPISODE)
+	loss_summary = tf.Summary(value=[
+		tf.Summary.Value(tag="ray loss", simple_value=float(history_ray.history['loss'][-1])),
+		tf.Summary.Value(tag="action loss", simple_value=float(history_action.history['loss'][-1])),
+		tf.Summary.Value(tag="critic loss", simple_value=float(history_critic.history['loss'][-1]))
+	])
+	summary_writer.add_summary(loss_summary, EPISODE)
 
 	if EPISODE % (20 * EPOCHS) == 0: 
 		action_model.save("saved_models/action_model_updates" + str(EPISODE))
