@@ -263,6 +263,7 @@ a_t[0] = 1 #index 0 = no flap, 1= flap
 
 game_state = []
 ray_states = []
+max_score = 0
 for i in range(0,THREADS):
 	game_state.append(game.GameState(30000))
 	starts = np.array([game_state[i].playerx, game_state[i].playery], dtype=np.float32)
@@ -281,6 +282,7 @@ def runprocess(thread_id, s_t, s_r_t):
 	global a_t
 	global ray_model
 	global action_model
+	global max_score
 
 	t = 0
 	t_start = t
@@ -357,6 +359,8 @@ def runprocess(thread_id, s_t, s_r_t):
 		a_t = [0,1] if 0.5 < actions[0] else [1,0]  #deterministic action
 
 		x_t, r_t, terminal = game_state[thread_id].frame_step(a_t)
+
+		max_score = max(max_score, game_state[thread_id].score)
 
 		# Invalid action penalty
 		# valid_check = np.append(actions, ray_actions)
@@ -556,16 +560,14 @@ while True:
 	f.close()
 	print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + str(history_ray.history['loss'][-1]) + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]))
 	
-	e_mean_summary = tf.Summary(value=[
-		tf.Summary.Value(tag="reward mean", simple_value=float(e_mean))
-	])
-	summary_writer.add_summary(e_mean_summary, EPISODE)
-	loss_summary = tf.Summary(value=[
+	summary = tf.Summary(value=[
+		tf.Summary.Value(tag="reward mean", simple_value=float(e_mean)),
 		tf.Summary.Value(tag="ray loss", simple_value=float(history_ray.history['loss'][-1])),
 		tf.Summary.Value(tag="action loss", simple_value=float(history_action.history['loss'][-1])),
-		tf.Summary.Value(tag="critic loss", simple_value=float(history_critic.history['loss'][-1]))
+		tf.Summary.Value(tag="critic loss", simple_value=float(history_critic.history['loss'][-1])),
+		tf.Summary.Value(tag="max score", simple_value=float(max_score))
 	])
-	summary_writer.add_summary(loss_summary, EPISODE)
+	summary_writer.add_summary(summary, EPISODE)
 
 	if EPISODE % (20 * EPOCHS) == 0: 
 		action_model.save("saved_models/action_model_updates" + str(EPISODE))
