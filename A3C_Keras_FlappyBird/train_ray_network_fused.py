@@ -43,16 +43,12 @@ IMAGE_COLS = 96
 ZOOM = 2
 NUM_CROPS = 1
 TIME_SLICES = 4
-EXTRA_ACTIONS = 0
-NUM_NORMAL_ACTIONS = 1
-NUM_ACTIONS = NUM_NORMAL_ACTIONS + EXTRA_ACTIONS
 IMAGE_CHANNELS = NUM_CROPS * TIME_SLICES
-LEARNING_RATE_RAY = 1e-4
-LEARNING_RATE_ACTION = 1e-4
+LEARNING_RATE = 1e-4
 LOSS_CLIPPING = 0.2
 NUM_RAYS = 5
-NUM_RAY_ACTIONS = 2
-ACTION_STATE_SIZE = NUM_RAY_ACTIONS + NUM_RAYS
+NUM_ACTIONS = 3 # Flap / no flap [1] + location [2]
+ACTION_STATE_SIZE = NUM_ACTIONS + NUM_RAYS
 RAY_START_VEL = 10
 RAY_ANGLE_VEL = 0.01 * np.pi
 # LOOK_SPEED = 0.1
@@ -67,19 +63,17 @@ T = 0
 EPISODE = 0
 
 episode_r = np.empty((0, 1), dtype=np.float32)
-episode_state_ray = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
-episode_state_action = np.zeros((0, (ACTION_STATE_SIZE) * TIME_SLICES))
-episode_action_ray = np.empty((0, NUM_RAY_ACTIONS), dtype=np.float32)
+episode_state_frames = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+episode_state_actions = np.zeros((0, (ACTION_STATE_SIZE) * TIME_SLICES))
 episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
-episode_pred_ray = np.empty((0, NUM_RAY_ACTIONS * 2), dtype=np.float32)
-episode_pred_action = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
+episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 episode_critic = np.empty((0, 1), dtype=np.float32)
 
 now = datetime.now().strftime("%Y%m%d-%H%M%S")
-summary_writer = tf.summary.FileWriter("logs/ray_pos/" + now, tf.get_default_graph())
+summary_writer = tf.summary.FileWriter("logs/fused/" + now, tf.get_default_graph())
 
 DUMMY_ADVANTAGE = np.zeros((1, 1))
-DUMMY_OLD_RAY_PRED = np.zeros((1, NUM_RAY_ACTIONS * 2))
+DUMMY_OLD_RAY_PRED = np.zeros((1, NUM_ACTIONS * 2))
 DUMMY_OLD_PRED  = np.zeros((1, NUM_ACTIONS * 2))
 
 ACTIONS = 2
@@ -91,18 +85,16 @@ sess = tf.Session(config=config)
 set_session(sess)  # set this TensorFlow session as the default session for Keras
 
 #loss function for policy output
-def logloss(advantage, num_actions, beta):     #policy loss
+def logloss(advantage):     #policy loss
 	def logloss_impl(y_true, y_pred):
+		num_actions = y_pred.shape[1] // 2
 		mu = y_pred[:,:num_actions]
 		sigma_sq = y_pred[:,num_actions:]
 		pdf = 1. / K.sqrt(2. * np.pi * sigma_sq) * K.exp(-K.square(y_true - mu) / (2. * sigma_sq))
 		log_pdf = K.log(pdf + K.epsilon())
-		aloss = -K.mean(log_pdf * advantage)
-
 		entropy = 0.5 * (K.log(2. * np.pi * sigma_sq + K.epsilon()) + 1.)
-		entropy_bonus = -beta * K.mean(entropy)
-
-		return aloss + entropy_bonus
+		losses = -log_pdf * advantage - BETA * entropy
+		return K.mean(losses)# + K.sum(K.min(K.abs(y_true), 1) - 1)
 	return logloss_impl
 
 def ppo_loss(advantage, old_pred, num_actions, beta):
@@ -130,7 +122,7 @@ def ppo_loss(advantage, old_pred, num_actions, beta):
 		# shape = [K.shape(y_pred)[0], num_actions]
 		# eps = K.random_normal(shape)
 		# actions = mu_pred + K.sqrt(var_pred) * eps
-		# energy_penalty = 0.01 * K.mean(K.square(actions))
+		# energy_penalty = 0.1 * K.mean(K.square(actions))
 
 		return aloss + entropy_bonus# + energy_penalty
 	return loss
@@ -139,14 +131,15 @@ def ppo_loss(advantage, old_pred, num_actions, beta):
 # def sumofsquares(y_true, y_pred):        #critic loss
 # 	return K.mean(K.square(y_pred - y_true))
 
-# function buildmodel() to define the structure of the neural network in use 
+#function buildmodel() to define the structure of the neural network in use 
 def build_ray_model():
 	print("Model building begins")
 
 	model = Sequential()
+	# keras.initializers.RandomUniform(minval=-0.1, maxval=0.1, seed=None)
 
 	S = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
-	SR = Input(shape = ((ACTION_STATE_SIZE) * TIME_SLICES, ), name = 'Input_Ray_State')
+	SR = Input(shape = (ACTION_STATE_SIZE * TIME_SLICES, ), name = 'Input_Ray_State')
 	h0 = CoordinateChannel2D()(S)
 	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', bias_initializer = 'random_uniform')(h0)
 	h1 = CoordinateChannel2D()(h0)
@@ -158,67 +151,49 @@ def build_ray_model():
 	h2 = Concatenate()([a, b])
 	
 	h3 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (h2)
-	P_mu = Dense(NUM_RAY_ACTIONS, activation = 'tanh', bias_initializer = 'random_uniform') (h3)
-	P_sigma = Dense(NUM_RAY_ACTIONS, activation = 'softplus', bias_initializer = 'random_uniform') (h3)
+
+	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', bias_initializer = 'random_uniform') (h3)
+	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', bias_initializer = 'random_uniform') (h3)
 	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
-	
-	A = Input(shape = (1,), name = 'Advantage')
-	O = Input(shape = (NUM_RAY_ACTIONS * 2,), name = 'Old_Prediction')
-	model = Model(inputs = [S,SR,A,O], outputs = P)
-	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
-	optimizer = Adam(lr = LEARNING_RATE_RAY)
-	model.compile(loss = ppo_loss(A, O, NUM_RAY_ACTIONS, BETA), optimizer = optimizer)
-	return model
-
-def build_action_model():
-	print("Model building begins")
-
-	model = Sequential()
-
-	S = Input(shape = ((ACTION_STATE_SIZE) * TIME_SLICES, ), name = 'Input')
-	h1 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (S)
-	h2 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (h1)
-
-	P_mu = Dense(NUM_ACTIONS, activation = 'tanh', bias_initializer = 'random_uniform') (h2)
-	P_sigma = Dense(NUM_ACTIONS, activation = 'softplus', bias_initializer = 'random_uniform') (h2)
-	P = Concatenate(name = 'o_P')([P_mu, P_sigma])
-	
-	A = Input(shape = (1,), name = 'Advantage')
-	O = Input(shape = (NUM_ACTIONS * 2,), name = 'Old_Prediction')
-	model = Model(inputs = [S,A,O], outputs = P)
-	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
-	optimizer = Adam(lr = LEARNING_RATE_ACTION)
-	model.compile(loss = ppo_loss(A, O, NUM_ACTIONS, BETA), optimizer = optimizer)
-	return model
-
-def build_critic_model():
-	print("Model building begins")
-
-	model = Sequential()
-	keras.initializers.RandomUniform(minval=-0.1, maxval=0.1, seed=None)
-
-	SI = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
-	SR = Input(shape = ((ACTION_STATE_SIZE) * TIME_SLICES, ), name = 'Input_Ray_State')
-
-	h0 = CoordinateChannel2D()(SI)
-	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', bias_initializer = 'random_uniform')(h0)
-	h1 = CoordinateChannel2D()(h0)
-	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', bias_initializer = 'random_uniform')(h1)
-	h2 = Flatten()(h1)
-
-	a = Dense(128, bias_initializer = 'random_uniform')(h2)
-	b = Dense(128, bias_initializer = 'random_uniform')(SR)
-	h2 = Concatenate()([a, b])
-
-	h3 = Dense(256, activation = 'relu', bias_initializer = 'random_uniform') (h2)
 
 	V = Dense(1, name = 'o_V') (h3)
 	
-	model = Model(inputs = [SI,SR], outputs = V)
+	A = Input(shape = (1,), name = 'Advantage')
+	O = Input(shape = (NUM_ACTIONS * 2,), name = 'Old_Prediction')
+	model = Model(inputs = [S,SR,A,O], outputs = [P,V])
 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
-	optimizer = Adam(lr = LEARNING_RATE_ACTION)
-	model.compile(loss = 'mse', optimizer = optimizer)
+	optimizer = Adam(lr = LEARNING_RATE)
+	model.compile(loss = {'o_P': ppo_loss(A,O, NUM_ACTIONS, BETA), 'o_V': 'mse'}, loss_weights = {'o_P': 1., 'o_V' : 1}, optimizer = optimizer)
 	return model
+
+# def build_critic_model():
+# 	print("Model building begins")
+
+# 	model = Sequential()
+# 	keras.initializers.RandomUniform(minval=-0.1, maxval=0.1, seed=None)
+
+# 	SI = Input(shape = (IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS, ), name = 'Input')
+# 	SR = Input(shape = (ACTION_STATE_SIZE * TIME_SLICES, ), name = 'Input_Ray_State')
+
+# 	h0 = CoordinateChannel2D()(SI)
+# 	h0 = Conv2D(16, kernel_size = (8,8), strides = (4,4), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h0)
+# 	h0 = BatchNormalization()(h0)
+# 	h1 = CoordinateChannel2D()(h0)
+# 	h1 = Conv2D(32, kernel_size = (4,4), strides = (2,2), activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform')(h1)
+# 	h1 = BatchNormalization()(h1)
+# 	h2 = Flatten()(h1)
+# 	h2 = Concatenate()([SR, h2])
+
+# 	h3 = Dense(256, activation = 'relu', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h2)
+# 	h3 = BatchNormalization()(h3)
+
+# 	V = Dense(1, name = 'o_V', kernel_initializer = 'random_uniform', bias_initializer = 'random_uniform') (h3)
+	
+# 	model = Model(inputs = [SI,SR], outputs = V)
+# 	# optimizer = RMSprop(lr = LEARNING_RATE, rho = 0.99, epsilon = 0.1)
+# 	optimizer = Adam(lr = LEARNING_RATE)
+# 	model.compile(loss = 'mse', optimizer = optimizer)
+# 	return model
 
 
 #function to preprocess an image before giving as input to the neural network
@@ -258,12 +233,9 @@ def preprocess(image, look_action=np.array((0, 0))):
 
 # initialize a new model using buildmodel() or use load_model to resume training an already trained model
 ray_model = build_ray_model()
-action_model = build_action_model()
-critic_model = build_critic_model()
+# critic_model = build_critic_model()
 # model.load_weights("saved_models/model_updates10080")
 ray_model._make_predict_function()
-action_model._make_predict_function()
-critic_model._make_predict_function()
 graph = tf.get_default_graph()
 
 a_t[0] = 1 #index 0 = no flap, 1= flap
@@ -289,7 +261,6 @@ def runprocess(thread_id, s_t, s_r_t):
 	global T
 	global a_t
 	global ray_model
-	global action_model
 	global max_score
 
 	t = 0
@@ -297,15 +268,11 @@ def runprocess(thread_id, s_t, s_r_t):
 	terminal = False
 	r_t = 0
 	r_store = np.empty((0, 1), dtype=np.float32)
-	r_store_action = np.empty((0, 1), dtype=np.float32)
-	state_store_ray = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
-	state_store_action = np.zeros((0, (ACTION_STATE_SIZE) * TIME_SLICES))
-	action_store_ray = np.zeros((0, NUM_RAY_ACTIONS))
+	state_store_frames = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+	state_store_actions = np.zeros((0, (ACTION_STATE_SIZE) * TIME_SLICES))
 	action_store = np.zeros((0, NUM_ACTIONS))
-	pred_store_ray = np.zeros((0, NUM_RAY_ACTIONS * 2))
-	pred_store_action = np.zeros((0, NUM_ACTIONS * 2))
+	pred_store = np.zeros((0, NUM_ACTIONS * 2))
 	critic_store = np.zeros((0, 1))
-	critic_store_action = np.zeros((0, 1))
 	s_t = s_t.reshape(1, s_t.shape[0], s_t.shape[1], s_t.shape[2])
 	s_r_t = s_r_t.reshape(1, -1)
 
@@ -332,17 +299,17 @@ def runprocess(thread_id, s_t, s_r_t):
 
 		# Get predicted ray vars
 		with graph.as_default():
-			ray_net_out = ray_model.predict([s_t, s_r_t, DUMMY_ADVANTAGE, DUMMY_OLD_RAY_PRED])[0]
-		num_actions = ray_net_out.shape[0] // 2
-		mu = ray_net_out[:num_actions]
-		sigma_sq = ray_net_out[num_actions:]
+			out = ray_model.predict([s_t, s_r_t, DUMMY_ADVANTAGE, DUMMY_OLD_RAY_PRED])[0][0]
+		num_actions = out.shape[0] // 2
+		mu = out[:num_actions]
+		sigma_sq = out[num_actions:]
 		eps = np.random.randn(mu.shape[0])
-		ray_actions = mu + np.sqrt(sigma_sq) * eps
-		# ray_starts = (ray_actions[:2] + 1) / 2 * current_frame.shape[0:2]
-		# ray_angles = ray_actions[2:] * np.pi
-		ray_starts_v = ray_actions[0:2]
+		actions = mu + np.sqrt(sigma_sq) * eps
+		# ray_starts = (actions[1:3] + 1) / 2 * current_frame.shape[0:2]
+		# ray_angles = actions[3:] * np.pi
+		ray_starts_v = actions[1:3]
 		ray_starts_v = RAY_START_VEL * ray_starts_v
-		# ray_angles_v = ray_actions[2:]
+		# ray_angles_v = actions[3:]
 		# ray_angles_v = RAY_ANGLE_VEL * ray_angles_v
 		ray_starts = ray_states[thread_id]['starts'] + ray_starts_v
 		# ray_starts = np.array([[game_state[thread_id].playerx + 10, game_state[thread_id].playery + 10]] * NUM_RAYS)
@@ -353,68 +320,54 @@ def runprocess(thread_id, s_t, s_r_t):
 		# ray_angles = (2 * np.pi + ray_angles) % (2 * np.pi)
 		# ray_states[thread_id]['angles'] = ray_angles
 
-		# Get action prediction using raycasts as input
-		with graph.as_default():
-			action_net_out = action_model.predict([s_r_t, DUMMY_ADVANTAGE, DUMMY_OLD_PRED])[0]
-		num_actions = action_net_out.shape[0] // 2
-		mu = action_net_out[:num_actions]
-		sigma_sq = action_net_out[num_actions:]
-		eps = np.random.randn(mu.shape[0])
-		actions = mu + np.sqrt(sigma_sq) * eps
-
 		# no = np.random.rand()
 		# a_t = [0,1] if no < actions[0] else [1,0]  #stochastic action
 		a_t = [0,1] if 0.5 < actions[0] else [1,0]  #deterministic action
 
 		x_t, r_t, terminal = game_state[thread_id].frame_step(a_t)
-
 		max_score = max(max_score, game_state[thread_id].score)
 
 		# Invalid action penalty
-		# valid_check = np.append(actions, ray_actions)
+		# valid_check = np.append(actions, actions)
 		# valid_check = np.append(valid_check, (unclipped_ray_starts / current_frame.shape[0:2] * 2) - 1) # Range [-1, 1]
 		# valid = (-1 <= valid_check) & (valid_check <= 1)
 		# invalid = ~valid
 		# r_t -= 0.1 * np.mean(invalid * np.abs(valid_check))
 
-		# # Penalize changing ray_actions between frames (raycast actions should be temporally stable)
-		# # ray_actions_trajectory = np.append(action_store_ray, ray_actions.reshape(1, -1), axis=0)
-		# # for i in range(1, ray_actions_trajectory.shape[0]):
+		# # Penalize changing actions between frames (raycast actions should be temporally stable)
+		# # actions_trajectory = np.append(action_store_ray, actions.reshape(1, -1), axis=0)
+		# # for i in range(1, actions_trajectory.shape[0]):
 		# r_t -= 0.1 * np.mean(np.square(s_r_t[0, NUM_RAYS * 5 : NUM_RAYS * 10] - s_r_t[0, :NUM_RAYS * 5]))
 
 		x_t = preprocess(x_t)
 
 		with graph.as_default():
-			critic_reward = critic_model.predict([s_t, s_r_t])
+			critic_reward = ray_model.predict([s_t, s_r_t, DUMMY_ADVANTAGE, DUMMY_OLD_RAY_PRED])[1][0]
 
 		# y = 0 if a_t[0] == 1 else 1
 		# y = np.hstack((y, look_action))
 		# y = np.reshape(y, (1, -1))
 
-		ray_actions = np.reshape(ray_actions, (1, -1))
 		actions = np.reshape(actions, (1, -1))
-		ray_net_out = np.reshape(ray_net_out, (1, -1))
-		action_net_out = np.reshape(action_net_out, (1, -1))
+		out = np.reshape(out, (1, -1))
 		critic_reward = np.reshape(critic_reward, (1, -1))
 
 		r_store = np.append(r_store, [[r_t] * 1], axis = 0)
-		state_store_ray = np.append(state_store_ray, s_t, axis = 0)
-		state_store_action = np.append(state_store_action, s_r_t, axis = 0)
-		action_store_ray = np.append(action_store_ray, ray_actions, axis=0)
+		state_store_frames = np.append(state_store_frames, s_t, axis = 0)
+		state_store_actions = np.append(state_store_actions, s_r_t, axis = 0)
 		action_store = np.append(action_store, actions, axis=0)
-		pred_store_ray = np.append(pred_store_ray, ray_net_out, axis = 0)
-		pred_store_action = np.append(pred_store_action, action_net_out, axis = 0)
+		pred_store = np.append(pred_store, out, axis = 0)
 		critic_store = np.append(critic_store, critic_reward, axis=0)
 		
 		# Update observed ray state
 		ray_state_starts = (ray_states[thread_id]['starts'] / current_frame.shape[0:2] * 2) - 1
-		ray_state = ray_state_starts.reshape(1, -1)
 		# ray_state_angles = np.concatenate([np.cos(ray_states[thread_id]['angles']).reshape(-1, 1), np.sin(ray_states[thread_id]['angles']).reshape(-1, 1)], axis=-1)
 		# ray_state = np.concatenate([ray_state_starts.reshape(1, -1), ray_state_angles.reshape(1, -1)], axis=-1)
-		s_r_t = np.append(np.concatenate([distances, ray_state], axis=-1), s_r_t[:, :-(ACTION_STATE_SIZE)], axis=-1)
+		ray_state = ray_state_starts.reshape(1, -1)
+		s_r_t = np.append(np.concatenate([actions[:,:1], distances, ray_state], axis=-1), s_r_t[:, :-ACTION_STATE_SIZE], axis=-1)
 		s_t = np.append(x_t, s_t[:, :, :, :-NUM_CROPS], axis=3)
 		# action_state = np.append(action_and_look, action_state[:, :-NUM_ACTIONS], axis=-1)
-		print("Frame = " + str(T) + ", Updates = " + str(EPISODE) + ", Thread = " + str(thread_id) + ", Action = " + str(a_t) + ", " + str(actions) + ", Output = "+ str(action_net_out))
+		print("Frame = " + str(T) + ", Updates = " + str(EPISODE) + ", Thread = " + str(thread_id) + ", Action = " + str(a_t) + ", " + str(actions[0,0:1]) + ", Output = " + str(np.array([mu[0], sigma_sq[0]])))
 	
 	if terminal == False:
 		r_store[len(r_store)-1] = critic_store[len(r_store)-1]
@@ -433,14 +386,14 @@ def runprocess(thread_id, s_t, s_r_t):
 		ray_state = ray_state_starts.reshape(1, -1)
 		# ray_state_angles = np.concatenate([np.cos(ray_states[thread_id]['angles']).reshape(-1, 1), np.sin(ray_states[thread_id]['angles']).reshape(-1, 1)], axis=-1)
 		# ray_state = np.concatenate([ray_state_starts.reshape(1, -1), ray_state_angles.reshape(1, -1)], axis=-1)
-		s_r_t = np.concatenate([distances, ray_state] * TIME_SLICES, axis=-1)
+		s_r_t = np.concatenate([[[0]], distances, ray_state] * TIME_SLICES, axis=-1)
 		# action_state = np.zeros((1, NUM_ACTIONS * TIME_SLICES))
 		# look_targets[thread_id] = np.array((0., 0.))
 	
 	for i in range(2,len(r_store)+1):
 		r_store[len(r_store)-i] = r_store[len(r_store)-i] + GAMMA*r_store[len(r_store)-i + 1]
 
-	return s_r_t, s_t, state_store_ray, state_store_action, action_store_ray, action_store, pred_store_ray, pred_store_action, r_store, critic_store
+	return s_r_t, s_t, state_store_frames, state_store_actions, action_store, pred_store, r_store, critic_store
 
 #function to decrease the learning rate after every epoch. In this manner, the learning rate reaches 0, by 20,000 epochs
 def create_decay_func(start_lr):
@@ -460,27 +413,23 @@ class actorthread(threading.Thread):
 
 	def run(self):
 		global episode_r
-		global episode_pred_ray
-		global episode_pred_action
-		global episode_action_ray
+		global episode_pred
 		global episode_action
-		global episode_state_ray
-		global episode_state_action 
+		global episode_state_frames
+		global episode_state_actions 
 		global episode_critic
 
 		threadLock.acquire()
-		# s_r_t, s_t, state_store_ray, state_store_action, action_store_ray, action_store, pred_store_ray, pred_store_action, r_store, critic_store
-		self.next_ray_state, self.next_state, state_store_ray, state_store_action, action_store_ray, action_store, pred_store_ray, pred_store_action, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_ray_state)
+		# s_r_t, s_t, state_store_frames, state_store_actions, action_store, pred_store, r_store, critic_store
+		self.next_ray_state, self.next_state, state_store_frames, state_store_actions, action_store, pred_store, r_store, critic_store = runprocess(self.thread_id, self.next_state, self.next_ray_state)
 		self.next_state = self.next_state.reshape(self.next_state.shape[1], self.next_state.shape[2], self.next_state.shape[3])
 		self.next_ray_state = self.next_ray_state.reshape(1, -1)
 
 		episode_r = np.append(episode_r, r_store, axis = 0)
-		episode_pred_ray = np.append(episode_pred_ray, pred_store_ray, axis = 0)
-		episode_pred_action = np.append(episode_pred_action, pred_store_action, axis = 0)
-		episode_action_ray = np.append(episode_action_ray, action_store_ray, axis = 0)
+		episode_pred = np.append(episode_pred, pred_store, axis = 0)
 		episode_action = np.append(episode_action, action_store, axis = 0)
-		episode_state_ray = np.append(episode_state_ray, state_store_ray, axis = 0)
-		episode_state_action = np.append(episode_state_action, state_store_action, axis = 0)
+		episode_state_frames = np.append(episode_state_frames, state_store_frames, axis = 0)
+		episode_state_actions = np.append(episode_state_actions, state_store_actions, axis = 0)
 		episode_critic = np.append(episode_critic, critic_store, axis = 0)
 
 		threadLock.release()
@@ -498,10 +447,12 @@ for i in range(0, len(game_state)):
 	distances /= np.sqrt(np.square(image.shape[0]) + np.square(image.shape[1]))
 	distances = distances * 2 - 1
 
+	flap_action = np.array([[0]])
 	ray_state_starts = (starts / image.shape[0:2] * 2) - 1
-	ray_state_angles = np.concatenate([np.cos(angles), np.sin(angles)], axis=-1)
-	ray_state = ray_state_starts #np.concatenate([ray_state_starts, ray_state_angles], axis=-1)
-	ray_state = np.concatenate([distances.reshape(1, -1), ray_state.reshape(1, -1)], axis=-1)
+	# ray_state_angles = np.concatenate([np.cos(angles), np.sin(angles)], axis=-1)
+	# ray_state = np.concatenate([ray_state_starts, ray_state_angles], axis=-1)
+	ray_state = ray_state_starts
+	ray_state = np.concatenate([flap_action, distances.reshape(1, -1), ray_state.reshape(1, -1)], axis=-1)
 	ray_state = np.concatenate([ray_state] * TIME_SLICES, axis=-1)
 	states_ray = np.append(states_ray, ray_state, axis=0)
 
@@ -545,42 +496,35 @@ while True:
 	# advantage = np.reshape(advantage, (-1, 1))
 	print("backpropagating")
 
-	lrate_ray = LearningRateScheduler(create_decay_func(LEARNING_RATE_RAY))
-	lrate_action = LearningRateScheduler(create_decay_func(LEARNING_RATE_ACTION))
-	callbacks_list_ray = [lrate_ray]
-	callbacks_list_action = [lrate_action]
-	callbacks_list_critic = [lrate_action]
+	lrate = LearningRateScheduler(create_decay_func(LEARNING_RATE))
+	callbacks_list = [lrate]
 
 	#backpropagation
-	history_ray = ray_model.fit([episode_state_ray, episode_state_action, advantage, episode_pred_ray], [episode_action_ray], callbacks = callbacks_list_ray, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
-	history_action = action_model.fit([episode_state_action, advantage, episode_pred_action], [episode_action], callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
-	history_critic = critic_model.fit([episode_state_ray, episode_state_action], [episode_r], callbacks = callbacks_list_critic, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	history_ray = ray_model.fit([episode_state_frames, episode_state_actions, advantage, episode_pred], [episode_action, episode_r], callbacks = callbacks_list, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	# history_critic = critic_model.fit([episode_state_frames, episode_state_actions], [episode_r], callbacks = callbacks_list, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
 	episode_r = np.empty((0, 1), dtype=np.float32)
-	episode_state_ray = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
-	episode_state_action = np.zeros((0, (ACTION_STATE_SIZE) * TIME_SLICES))
-	episode_action_ray = np.empty((0, NUM_RAY_ACTIONS), dtype=np.float32)
+	episode_state_frames = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
+	episode_state_actions = np.zeros((0, (ACTION_STATE_SIZE) * TIME_SLICES))
 	episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
-	episode_pred_ray = np.empty((0, NUM_RAY_ACTIONS * 2), dtype=np.float32)
-	episode_pred_action = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
+	episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 	episode_critic = np.empty((0, 1), dtype=np.float32)
 
 	f = open("rewards.txt","a")
-	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + str(history_ray.history['loss'][-1]) + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]) + "\n")
+	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + str(history_ray.history['loss'][-1]) + "\n")
 	f.close()
-	print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + str(history_ray.history['loss'][-1]) + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]))
-	
+	print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + str(history_ray.history['loss'][-1]))
+
 	summary = tf.Summary(value=[
 		tf.Summary.Value(tag="reward mean", simple_value=float(e_mean)),
-		tf.Summary.Value(tag="ray loss", simple_value=float(history_ray.history['loss'][-1])),
-		tf.Summary.Value(tag="action loss", simple_value=float(history_action.history['loss'][-1])),
-		tf.Summary.Value(tag="critic loss", simple_value=float(history_critic.history['loss'][-1])),
+		tf.Summary.Value(tag="total loss", simple_value=float(history_ray.history['loss'][-1])),
+		tf.Summary.Value(tag="action loss", simple_value=float(history_ray.history['o_P_loss'][-1])),
+		tf.Summary.Value(tag="critic loss", simple_value=float(history_ray.history['o_V_loss'][-1])),
 		tf.Summary.Value(tag="max score", simple_value=float(max_score))
 	])
 	summary_writer.add_summary(summary, EPISODE)
 
 	if EPISODE % (20 * EPOCHS) == 0: 
-		action_model.save("saved_models/ray_pos/action_model_updates" + str(EPISODE))
-		ray_model.save("saved_models/ray_pos/ray_model_updates" + str(EPISODE))
-		critic_model.save("saved_models/ray_pos/critic_model_update" + str(EPISODE))
+		ray_model.save("saved_models/fused/ray_model_updates" + str(EPISODE))
+		# critic_model.save("saved_models/critic_model_update" + str(EPISODE))
 	EPISODE += EPOCHS

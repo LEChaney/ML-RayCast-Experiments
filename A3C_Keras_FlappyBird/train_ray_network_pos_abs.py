@@ -76,7 +76,7 @@ episode_pred_action = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 episode_critic = np.empty((0, 1), dtype=np.float32)
 
 now = datetime.now().strftime("%Y%m%d-%H%M%S")
-summary_writer = tf.summary.FileWriter("logs/ray_pos/" + now, tf.get_default_graph())
+summary_writer = tf.summary.FileWriter("logs/ray_pos_abs/" + now, tf.get_default_graph())
 
 DUMMY_ADVANTAGE = np.zeros((1, 1))
 DUMMY_OLD_RAY_PRED = np.zeros((1, NUM_RAY_ACTIONS * 2))
@@ -338,13 +338,13 @@ def runprocess(thread_id, s_t, s_r_t):
 		sigma_sq = ray_net_out[num_actions:]
 		eps = np.random.randn(mu.shape[0])
 		ray_actions = mu + np.sqrt(sigma_sq) * eps
-		# ray_starts = (ray_actions[:2] + 1) / 2 * current_frame.shape[0:2]
+		ray_starts = (ray_actions[:2] + 1) / 2 * current_frame.shape[0:2]
 		# ray_angles = ray_actions[2:] * np.pi
-		ray_starts_v = ray_actions[0:2]
-		ray_starts_v = RAY_START_VEL * ray_starts_v
+		# ray_starts_v = ray_actions[0:2]
+		# ray_starts_v = RAY_START_VEL * ray_starts_v
 		# ray_angles_v = ray_actions[2:]
 		# ray_angles_v = RAY_ANGLE_VEL * ray_angles_v
-		ray_starts = ray_states[thread_id]['starts'] + ray_starts_v
+		# ray_starts = ray_states[thread_id]['starts'] + ray_starts_v
 		# ray_starts = np.array([[game_state[thread_id].playerx + 10, game_state[thread_id].playery + 10]] * NUM_RAYS)
 		unclipped_ray_starts = ray_starts # Unbounded
 		ray_starts = np.clip(ray_starts, 0, current_frame.shape[0:2]) # Clipped to range [0, frame_size]
@@ -580,7 +580,7 @@ while True:
 	summary_writer.add_summary(summary, EPISODE)
 
 	if EPISODE % (20 * EPOCHS) == 0: 
-		action_model.save("saved_models/ray_pos/action_model_updates" + str(EPISODE))
-		ray_model.save("saved_models/ray_pos/ray_model_updates" + str(EPISODE))
-		critic_model.save("saved_models/ray_pos/critic_model_update" + str(EPISODE))
+		action_model.save("saved_models/ray_pos_abs/action_model_updates" + str(EPISODE))
+		ray_model.save("saved_models/ray_pos_abs/ray_model_updates" + str(EPISODE))
+		critic_model.save("saved_models/ray_pos_abs/critic_model_update" + str(EPISODE))
 	EPISODE += EPOCHS
