@@ -52,7 +52,7 @@ LOOK_SPEED = 0.1
 # TEMP_INCR = 1e-6
 
 EPOCHS = 3
-THREADS = 16
+THREADS = 1
 T_MAX = 15
 BATCH_SIZE = 80
 T = 0
@@ -65,8 +65,8 @@ episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
 episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 episode_critic = np.empty((0, 1), dtype=np.float32)
 
-now = datetime.now().strftime("%Y%m%d-%H%M%S")
-summary_writer = tf.summary.FileWriter("logs/look_abs/" + now, tf.get_default_graph())
+# now = datetime.now().strftime("%Y%m%d-%H%M%S")
+# summary_writer = tf.summary.FileWriter("logs/look_abs/" + now, tf.get_default_graph())
 
 DUMMY_ADVANTAGE = np.zeros((1, 1))
 DUMMY_OLD_PRED  = np.zeros((1, NUM_ACTIONS * 2))
@@ -196,7 +196,7 @@ def preprocess(image, look_action=np.array((0, 0))):
 
 # initialize a new model using buildmodel() or use load_model to resume training an already trained model
 model = buildmodel()
-# model.load_weights("saved_models/model_updates10080")
+model.load_weights("saved_models/look_abs/model_updates8220")
 model._make_predict_function()
 graph = tf.get_default_graph()
 
@@ -420,7 +420,7 @@ while True:
 	callbacks_list = [lrate]
 
 	#backpropagation
-	history = model.fit([episode_state, episode_action_state, advantage, episode_pred], {'o_P': episode_action, 'o_V': episode_r}, callbacks = callbacks_list, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	# history = model.fit([episode_state, episode_action_state, advantage, episode_pred], {'o_P': episode_action, 'o_V': episode_r}, callbacks = callbacks_list, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
 	episode_r = np.empty((0, 1), dtype=np.float32)
 	episode_pred = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
@@ -429,20 +429,20 @@ while True:
 	episode_action_state = np.zeros((0, NUM_ACTIONS * TIME_SLICES))
 	episode_critic = np.empty((0, 1), dtype=np.float32)
 
-	f = open("rewards.txt","a")
-	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]) + "\n")
-	f.close()
-	print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]))
+	# f = open("rewards.txt","a")
+	# f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]) + "\n")
+	# f.close()
+	# print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Loss: " + str(history.history['loss'][-1]))
 
-	summary = tf.Summary(value=[
-		tf.Summary.Value(tag="reward mean", simple_value=float(e_mean)),
-		tf.Summary.Value(tag="total loss", simple_value=float(history.history['loss'][-1])),
-		tf.Summary.Value(tag="action loss", simple_value=float(history.history['o_P_loss'][-1])),
-		tf.Summary.Value(tag="critic loss", simple_value=float(history.history['o_V_loss'][-1])),
-		tf.Summary.Value(tag="max score", simple_value=float(max_score))
-	])
-	summary_writer.add_summary(summary, EPISODE)
+	# summary = tf.Summary(value=[
+	# 	tf.Summary.Value(tag="reward mean", simple_value=float(e_mean)),
+	# 	tf.Summary.Value(tag="total loss", simple_value=float(history.history['loss'][-1])),
+	# 	tf.Summary.Value(tag="action loss", simple_value=float(history.history['o_P_loss'][-1])),
+	# 	tf.Summary.Value(tag="critic loss", simple_value=float(history.history['o_V_loss'][-1])),
+	# 	tf.Summary.Value(tag="max score", simple_value=float(max_score))
+	# ])
+	# summary_writer.add_summary(summary, EPISODE)
 
-	if EPISODE % (20 * EPOCHS) == 0: 
-		model.save("saved_models/look_abs/model_updates" +	str(EPISODE)) 
+	# if EPISODE % (20 * EPOCHS) == 0: 
+	# 	model.save("saved_models/look_abs/model_updates" +	str(EPISODE)) 
 	EPISODE += EPOCHS

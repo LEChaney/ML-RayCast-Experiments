@@ -59,7 +59,7 @@ RAY_ANGLE_VEL = 0.01 * np.pi
 # TEMP_INCR = 1e-6
 
 EPOCHS = 3
-THREADS = 16
+THREADS = 1
 T_MAX = 15
 BATCH_SIZE = 80
 T = 0
@@ -74,8 +74,8 @@ episode_action = np.empty((0, NUM_ACTIONS), dtype=np.float32)
 episode_pred_action = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 episode_critic = np.empty((0, 1), dtype=np.float32)
 
-now = datetime.now().strftime("%Y%m%d-%H%M%S")
-summary_writer = tf.summary.FileWriter("logs/ray_actual/" + now, tf.get_default_graph())
+# now = datetime.now().strftime("%Y%m%d-%H%M%S")
+# summary_writer = tf.summary.FileWriter("logs/ray_actual/" + now, tf.get_default_graph())
 
 DUMMY_ADVANTAGE = np.zeros((1, 1))
 DUMMY_OLD_RAY_PRED = np.zeros((1, NUM_RAY_ACTIONS * 2))
@@ -259,7 +259,8 @@ def preprocess(image, look_action=np.array((0, 0))):
 # ray_model = build_ray_model()
 action_model = build_action_model()
 critic_model = build_critic_model()
-# model.load_weights("saved_models/model_updates10080")
+action_model.load_weights("saved_models/ray_actual/action_model_updates9480")
+critic_model.load_weights("saved_models/ray_actual/critic_model_update9480")
 # ray_model._make_predict_function()
 action_model._make_predict_function()
 critic_model._make_predict_function()
@@ -552,8 +553,8 @@ while True:
 
 	#backpropagation
 	# history_ray = ray_model.fit([episode_state_ray, episode_state_action, advantage, episode_pred_ray], [episode_action_ray], callbacks = callbacks_list_ray, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
-	history_action = action_model.fit([episode_state_action, advantage, episode_pred_action], [episode_action], callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
-	history_critic = critic_model.fit([episode_state_ray, episode_state_action], [episode_r], callbacks = callbacks_list_critic, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	# history_action = action_model.fit([episode_state_action, advantage, episode_pred_action], [episode_action], callbacks = callbacks_list_action, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
+	# history_critic = critic_model.fit([episode_state_ray, episode_state_action], [episode_r], callbacks = callbacks_list_critic, epochs = EPISODE + EPOCHS, batch_size = BATCH_SIZE, initial_epoch = EPISODE)
 
 	episode_r = np.empty((0, 1), dtype=np.float32)
 	episode_state_ray = np.zeros((0, IMAGE_ROWS, IMAGE_COLS, IMAGE_CHANNELS))
@@ -564,22 +565,22 @@ while True:
 	episode_pred_action = np.empty((0, NUM_ACTIONS * 2), dtype=np.float32)
 	episode_critic = np.empty((0, 1), dtype=np.float32)
 
-	f = open("rewards.txt","a")
-	f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]) + "\n")
-	f.close()
-	print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]))
+	# f = open("rewards.txt","a")
+	# f.write("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]) + "\n")
+	# f.close()
+	# print("Update: " + str(EPISODE) + ", Reward_mean: " + str(e_mean) + ", Ray_Loss: " + ", Action_Loss: " + str(history_action.history['loss'][-1]) + ", Critic_Loss: " + str(history_critic.history['loss'][-1]))
 	
-	summary = tf.Summary(value=[
-		tf.Summary.Value(tag="reward mean", simple_value=float(e_mean)),
-		# tf.Summary.Value(tag="ray loss", simple_value=float(history_ray.history['loss'][-1])),
-		tf.Summary.Value(tag="action loss", simple_value=float(history_action.history['loss'][-1])),
-		tf.Summary.Value(tag="critic loss", simple_value=float(history_critic.history['loss'][-1])),
-		tf.Summary.Value(tag="max score", simple_value=float(max_score))
-	])
-	summary_writer.add_summary(summary, EPISODE)
+	# summary = tf.Summary(value=[
+	# 	tf.Summary.Value(tag="reward mean", simple_value=float(e_mean)),
+	# 	# tf.Summary.Value(tag="ray loss", simple_value=float(history_ray.history['loss'][-1])),
+	# 	tf.Summary.Value(tag="action loss", simple_value=float(history_action.history['loss'][-1])),
+	# 	tf.Summary.Value(tag="critic loss", simple_value=float(history_critic.history['loss'][-1])),
+	# 	tf.Summary.Value(tag="max score", simple_value=float(max_score))
+	# ])
+	# summary_writer.add_summary(summary, EPISODE)
 
-	if EPISODE % (20 * EPOCHS) == 0: 
-		action_model.save("saved_models/ray_actual/action_model_updates" + str(EPISODE))
-		# ray_model.save("saved_models/ray_actual/ray_model_updates" + str(EPISODE))
-		critic_model.save("saved_models/ray_actual/critic_model_update" + str(EPISODE))
+	# if EPISODE % (20 * EPOCHS) == 0: 
+	# 	action_model.save("saved_models/ray_actual/action_model_updates" + str(EPISODE))
+	# 	# ray_model.save("saved_models/ray_actual/ray_model_updates" + str(EPISODE))
+	# 	critic_model.save("saved_models/ray_actual/critic_model_update" + str(EPISODE))
 	EPISODE += EPOCHS
